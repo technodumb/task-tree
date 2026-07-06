@@ -26,6 +26,17 @@ struct DragVisual {
     bool   showPreviewEdge = false;
 };
 
+// Geometry for the DONE side panel (screen coordinates), computed by App.
+struct DonePanelLayout {
+    bool  visible = false;
+    bool  pinned = false;
+    Rect  panel;              // full panel rectangle
+    Rect  titleBar;           // top bar holding the title + pin button
+    Rect  pinButton;          // autohide toggle
+    float contentClipTop = 0.f;
+    float contentClipBottom = 0.f;
+};
+
 class Renderer {
 public:
     bool init(NVGcontext* vg, const std::string& fontPath);
@@ -46,10 +57,18 @@ public:
                   const Config& cfg, const DragVisual& dv);
 
     // The input widget. In quick-add mode it's a centred box with a drop shadow;
-    // otherwise a bar at the top of the overlay.
+    // otherwise a bar at the bottom of the overlay.
     void drawInput(float screenW, float screenH, const std::string& text,
                    std::size_t caretByte, bool caretOn, const Config& cfg,
                    bool quickAddMode);
+
+    // The DONE side panel: greenish background, "DONE" title, autohide toggle, and a
+    // (scissor-clipped, already scroll-positioned) list of done-item cards.
+    void drawDonePanel(const DonePanelLayout& layout, const Forest& f,
+                       const std::unordered_map<TaskId, Rect>& cards, const Config& cfg);
+
+    // Wrapped height of `text` at the given content width (for card sizing).
+    float measureTextHeight(const std::string& text, float width) const;
 
     float fontSize() const { return fontSize_; }
 

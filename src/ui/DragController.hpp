@@ -18,6 +18,7 @@ namespace tt {
 class DragController {
 public:
     bool   active() const { return active_; }
+    bool   moved() const { return moved_; }   // true once dragged past the click threshold
     TaskId dragged() const { return dragged_; }
     TaskId target() const { return target_; }
     int    insertIndex() const { return insertIndex_; }
@@ -53,6 +54,8 @@ private:
     TaskId target_ = 0;       // 0 => drop at the root level
     int    insertIndex_ = 0;
     Vec2   cursor_;
+    Vec2   startCursor_;      // cursor at pickup (for the click-vs-drag threshold)
+    bool   moved_ = false;
     Vec2   grabOffset_;       // cursor - node top-left at pickup
     Rect   ghost_;
 

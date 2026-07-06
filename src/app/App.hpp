@@ -36,6 +36,7 @@ public:
     void onKey(int key, int action, int mods);
     void onMouseButton(int button, int action, int mods);
     void onCursorPos(double x, double y);
+    void onScroll(double dx, double dy);
 
     // Called from a classifier worker thread; enqueues a result and wakes the loop.
     void pushClassification(TaskId newTask, ClassifyResult result);
@@ -57,6 +58,12 @@ private:
     bool caretOn() const;
     DragVisual buildDragVisual();
 
+    // DONE panel helpers.
+    void layoutDonePanel(int winW, int winH);
+    bool pointInPanel(Vec2 p) const;
+    TaskId hitTestDone(Vec2 p) const;
+    void handleDoubleClick();
+
     IPlatform&    platform_;
     Renderer&     renderer_;
     IClassifier&  classifier_;
@@ -74,6 +81,17 @@ private:
     std::unordered_map<TaskId, Rect> previewRects_; // layout during a drag
     Vec2 mouse_;
     bool needsRelayout_ = true;
+
+    // DONE side panel state.
+    bool  pinned_ = false;           // autohide off when true
+    bool  doneHover_ = false;        // mouse in the reveal/keep zone (autohide)
+    float scrollY_ = 0.f;
+    float doneMaxScroll_ = 0.f;
+    int   lastWinW_ = 0, lastWinH_ = 0;
+    DonePanelLayout donePanel_;
+    std::unordered_map<TaskId, Rect> doneRects_; // card rects (screen coords)
+    double lastClickTime_ = 0.0;
+    Vec2   lastClickPos_;
 
     std::mutex pendingMutex_;
     std::vector<std::pair<TaskId, ClassifyResult>> pending_;

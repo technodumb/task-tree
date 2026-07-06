@@ -49,6 +49,7 @@ void Forest::detachFromParent(TaskId child) {
         if (Task* p = get(c->parent)) eraseId(p->children, child);
     } else {
         eraseId(roots, child);
+        eraseId(doneRoots, child);
     }
     c->parent = kNoParent;
 }
@@ -86,19 +87,44 @@ std::size_t Forest::removeSubtree(TaskId id) {
     return victims.size();
 }
 
+bool Forest::markDone(TaskId id) {
+    Task* t = get(id);
+    if (!t) return false;
+    if (std::find(doneRoots.begin(), doneRoots.end(), id) != doneRoots.end()) return false;
+    detachFromParent(id); // remove from parent/roots; parent -> kNoParent
+    t->done = true;
+    doneRoots.push_back(id);
+    return true;
+}
+
+bool Forest::restoreFromDone(TaskId id) {
+    auto it = std::find(doneRoots.begin(), doneRoots.end(), id);
+    if (it == doneRoots.end()) return false;
+    doneRoots.erase(it);
+    Task* t = get(id);
+    if (!t) return false;
+    t->done = false;
+    t->parent = kNoParent;
+    roots.push_back(id);
+    return true;
+}
+
 void Forest::reindexRootsAfterLoad() {
     roots.clear();
-    // First pass: any node whose parent is missing becomes a root and its link cleared.
+    doneRoots.clear();
+    // First pass: any node whose parent is missing becomes a top-level node.
     for (auto& [id, t] : nodes) {
         if (t.parent != kNoParent && !exists(t.parent)) t.parent = kNoParent;
     }
-    // Rebuild roots preserving each node's declared children order where possible:
-    // a node is a root iff it has no parent. Roots are ordered by id for determinism
-    // when the loader did not record a top-level order.
+    // A parent-less node is a canvas root, or a DONE root if flagged done. Ordered by
+    // id for determinism when the loader recorded no explicit order.
     for (auto& [id, t] : nodes) {
-        if (t.parent == kNoParent) roots.push_back(id);
+        if (t.parent != kNoParent) continue;
+        if (t.done) doneRoots.push_back(id);
+        else        roots.push_back(id);
     }
     std::sort(roots.begin(), roots.end());
+    std::sort(doneRoots.begin(), doneRoots.end());
 }
 
 } // namespace tt

@@ -124,6 +124,9 @@ int main() {
     glfwSetCursorPosCallback(win, [](GLFWwindow* w, double x, double y) {
         appOf(w)->onCursorPos(x, y);
     });
+    glfwSetScrollCallback(win, [](GLFWwindow* w, double dx, double dy) {
+        appOf(w)->onScroll(dx, dy);
+    });
 
     std::fprintf(stderr, "TaskTree running. Toggle: %s   Quick-add: %s\n",
                  cfg.toggleHotkey.c_str(), cfg.quickAddHotkey.c_str());

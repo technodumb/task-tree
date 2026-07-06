@@ -43,17 +43,20 @@ bool load(Forest& f, const std::string& path) {
     f.nextId = std::max<TaskId>(f.nextId, j.value("nextId", f.nextId));
 
     // Prefer the explicit top-level order if present and still valid.
-    bool rootsOk = j.contains("roots");
-    if (rootsOk) {
-        for (const auto& r : j["roots"]) {
+    bool ok = j.contains("roots") && j.contains("doneRoots");
+    auto readList = [&](const char* key, std::vector<TaskId>& out) {
+        for (const auto& r : j[key]) {
             TaskId id = r.get<TaskId>();
             const Task* t = f.get(id);
-            if (!t || t->parent != kNoParent) { rootsOk = false; break; }
-            f.roots.push_back(id);
+            if (!t || t->parent != kNoParent) return false;
+            out.push_back(id);
         }
-    }
-    if (!rootsOk) {
+        return true;
+    };
+    if (ok) ok = readList("roots", f.roots) && readList("doneRoots", f.doneRoots);
+    if (!ok) {
         f.roots.clear();
+        f.doneRoots.clear();
         f.reindexRootsAfterLoad();
     }
     return true;
@@ -78,6 +81,7 @@ bool save(const Forest& f, const std::string& path) {
         {"version", 1},
         {"nextId", f.nextId},
         {"roots", f.roots},
+        {"doneRoots", f.doneRoots},
         {"tasks", std::move(tasks)},
     };
 

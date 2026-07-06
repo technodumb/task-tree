@@ -1,9 +1,11 @@
 #include "app/App.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <limits>
 #include <utility>
+#include <vector>
 
 #include <GLFW/glfw3.h>
 
@@ -88,10 +90,26 @@ void App::onKey(int key, int action, int mods) {
 void App::onMouseButton(int button, int action, int /*mods*/) {
     if (mode_ != Mode::Full || button != GLFW_MOUSE_BUTTON_LEFT) return;
     if (action == GLFW_PRESS) {
-        const TaskId id = hitTest(mouse_);
-        if (id != 0) {
-            auto it = rects_.find(id);
-            if (it != rects_.end()) drag_.begin(id, mouse_, it->second);
+        // Autohide toggle button.
+        if (donePanel_.visible && donePanel_.pinButton.contains(mouse_.x, mouse_.y)) {
+            pinned_ = !pinned_;
+            return;
+        }
+        // Double-click (same spot, within 400 ms) -> move to / from DONE.
+        const double t = glfwGetTime();
+        const bool dbl = (t - lastClickTime_ < 0.40) &&
+                         std::fabs(mouse_.x - lastClickPos_.x) < 8.f &&
+                         std::fabs(mouse_.y - lastClickPos_.y) < 8.f;
+        lastClickTime_ = dbl ? 0.0 : t;
+        lastClickPos_ = mouse_;
+        if (dbl) { handleDoubleClick(); return; }
+        // Single press begins a drag, but only on the canvas (not the DONE panel).
+        if (!pointInPanel(mouse_)) {
+            const TaskId id = hitTest(mouse_);
+            if (id != 0) {
+                auto it = rects_.find(id);
+                if (it != rects_.end()) drag_.begin(id, mouse_, it->second);
+            }
         }
     } else if (action == GLFW_RELEASE) {
         if (drag_.active() && drag_.drop(forest_)) { forceRelayout(); save(); }
@@ -100,7 +118,20 @@ void App::onMouseButton(int button, int action, int /*mods*/) {
 
 void App::onCursorPos(double x, double y) {
     mouse_ = {static_cast<float>(x), static_cast<float>(y)};
+    // Autohide reveal with hysteresis: reveal within the right 10%, keep visible while
+    // over the panel (right 15%), hide once the cursor moves left of the panel.
+    if (mode_ == Mode::Full && lastWinW_ > 0) {
+        const float w = static_cast<float>(lastWinW_);
+        if (mouse_.x >= w * 0.90f) doneHover_ = true;
+        else if (mouse_.x < w * 0.85f) doneHover_ = false;
+    }
     if (drag_.active()) drag_.update(mouse_, forest_, rects_, params_);
+}
+
+void App::onScroll(double /*dx*/, double dy) {
+    if (mode_ != Mode::Full || !donePanel_.visible || !pointInPanel(mouse_)) return;
+    scrollY_ -= static_cast<float>(dy) * 48.f;
+    scrollY_ = std::max(0.f, std::min(scrollY_, doneMaxScroll_));
 }
 
 // ---- task creation + classification ----------------------------------------
@@ -165,7 +196,7 @@ void App::relayoutIfNeeded() {
 
 DragVisual App::buildDragVisual() {
     DragVisual dv;
-    if (!drag_.active()) return dv;
+    if (!drag_.active() || !drag_.moved()) return dv;
     previewRects_ = drag_.previewLayout(forest_, rects_);
     dv.active = true;
     dv.dragged = drag_.dragged();
@@ -181,23 +212,92 @@ DragVisual App::buildDragVisual() {
 }
 
 void App::drawScene(int winW, int winH, float dpr) {
-    // Centre the forest horizontally within the window (roots -> top-centre).
-    if (params_.centerWidth != static_cast<float>(winW)) {
-        params_.centerWidth = static_cast<float>(winW);
-        needsRelayout_ = true;
-    }
+    lastWinW_ = winW;
+    lastWinH_ = winH;
+    // Reserve the right 15% for the DONE panel; centre the forest in the rest
+    // (roots -> top-centre of the canvas area).
+    const float cw = winW * 0.85f;
+    if (params_.centerWidth != cw) { params_.centerWidth = cw; needsRelayout_ = true; }
     relayoutIfNeeded();
+    layoutDonePanel(winW, winH);
+
     renderer_.beginFrame(winW, winH, dpr);
     if (mode_ == Mode::Full) {
         renderer_.drawScrim(static_cast<float>(winW), static_cast<float>(winH), cfg_);
         DragVisual dv = buildDragVisual();
         const auto& drawRects = dv.active ? previewRects_ : rects_;
         renderer_.drawTree(forest_, drawRects, cfg_, dv);
+        if (donePanel_.visible)
+            renderer_.drawDonePanel(donePanel_, forest_, doneRects_, cfg_);
         renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(), cfg_, false);
     } else if (mode_ == Mode::QuickAdd) {
         renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(), cfg_, true);
     }
     renderer_.endFrame();
+}
+
+void App::layoutDonePanel(int winW, int winH) {
+    DonePanelLayout L;
+    L.pinned = pinned_;
+    L.visible = (mode_ == Mode::Full) && (pinned_ || doneHover_);
+    const float pw = winW * 0.15f;
+    L.panel = {winW - pw, 0.f, pw, static_cast<float>(winH)};
+    const float titleH = 50.f;
+    L.titleBar = {L.panel.x, 0.f, pw, titleH};
+    const float btnW = 74.f, btnH = 26.f;
+    L.pinButton = {L.panel.right() - btnW - 12.f, (titleH - btnH) * 0.5f, btnW, btnH};
+    L.contentClipTop = titleH + 6.f;
+    L.contentClipBottom = static_cast<float>(winH) - 8.f;
+    donePanel_ = L;
+
+    // Measure card heights, clamp scroll, then position (screen coords, scrolled).
+    const float pad = 12.f, gap = 10.f;
+    const float cardW = pw - 2 * pad;
+    std::vector<std::pair<TaskId, float>> heights;
+    float totalH = 0.f;
+    for (TaskId id : forest_.doneRoots) {
+        const Task* t = forest_.get(id);
+        if (!t) continue;
+        float h = renderer_.measureTextHeight(t->text, cardW - 24.f) + 20.f;
+        h = std::max(h, 40.f);
+        heights.emplace_back(id, h);
+        totalH += h + gap;
+    }
+    const float visibleH = L.contentClipBottom - L.contentClipTop;
+    doneMaxScroll_ = std::max(0.f, totalH - visibleH);
+    scrollY_ = std::max(0.f, std::min(scrollY_, doneMaxScroll_));
+
+    doneRects_.clear();
+    float y = L.contentClipTop - scrollY_;
+    for (const auto& [id, h] : heights) {
+        doneRects_[id] = Rect{L.panel.x + pad, y, cardW, h};
+        y += h + gap;
+    }
+}
+
+bool App::pointInPanel(Vec2 p) const {
+    return donePanel_.visible && donePanel_.panel.contains(p.x, p.y);
+}
+
+TaskId App::hitTestDone(Vec2 p) const {
+    if (!pointInPanel(p)) return 0;
+    if (p.y < donePanel_.contentClipTop || p.y > donePanel_.contentClipBottom) return 0;
+    for (const auto& [id, r] : doneRects_)
+        if (r.contains(p.x, p.y)) return id;
+    return 0;
+}
+
+void App::handleDoubleClick() {
+    if (pointInPanel(mouse_)) {
+        const TaskId id = hitTestDone(mouse_);
+        if (id != 0 && forest_.restoreFromDone(id)) { forceRelayout(); save(); }
+    } else {
+        const TaskId id = hitTest(mouse_);
+        if (id != 0) {
+            if (drag_.active()) drag_.cancel();
+            if (forest_.markDone(id)) { forceRelayout(); save(); }
+        }
+    }
 }
 
 TaskId App::hitTest(Vec2 p) const {

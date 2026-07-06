@@ -6,6 +6,7 @@
 #include "model/Task.hpp"
 #include "platform/Hotkey.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -68,6 +69,26 @@ int main() {
         CHECK(store::load(g, path), "load orphan file");
         CHECK(g.get(5) && g.get(5)->parent == kNoParent, "orphan promoted to root");
         CHECK(g.roots.size() == 1 && g.roots[0] == 5, "orphan is a root");
+        fs::remove(path);
+    }
+
+    // ---- DONE section persistence ---------------------------------------------
+    {
+        Forest f;
+        f.addTask("keep me");
+        TaskId d = f.addTask("finished");
+        f.addTask("subtask", d);
+        f.markDone(d);
+
+        const std::string path = tmpFile("done.json").string();
+        CHECK(store::save(f, path), "save with a done task");
+        Forest g;
+        CHECK(store::load(g, path), "load with a done task");
+        CHECK(g.doneRoots.size() == 1 && g.doneRoots[0] == d, "doneRoots persisted");
+        CHECK(g.get(d) && g.get(d)->done, "done flag persisted");
+        CHECK(std::find(g.roots.begin(), g.roots.end(), d) == g.roots.end(),
+              "done task is not a canvas root");
+        CHECK(g.get(d)->children.size() == 1, "done subtree intact");
         fs::remove(path);
     }
 

@@ -204,4 +204,71 @@ void Renderer::drawInput(float screenW, float screenH, const std::string& text,
     }
 }
 
+float Renderer::measureTextHeight(const std::string& text, float width) const {
+    if (text.empty()) return fontSize_;
+    nvgFontFaceId(vg_, font_);
+    nvgFontSize(vg_, fontSize_);
+    nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+    float b[4] = {0, 0, 0, 0};
+    nvgTextBoxBounds(vg_, 0, 0, std::max(10.f, width), text.c_str(), end(text), b);
+    return b[3] - b[1];
+}
+
+void Renderer::drawDonePanel(const DonePanelLayout& L, const Forest& f,
+                             const std::unordered_map<TaskId, Rect>& cards, const Config& cfg) {
+    const Rect& p = L.panel;
+
+    // Panel background + a brighter left edge to read as a distinct surface.
+    nvgBeginPath(vg_);
+    nvgRect(vg_, p.x, p.y, p.w, p.h);
+    nvgFillColor(vg_, col(cfg.donePanelBg));
+    nvgFill(vg_);
+    nvgBeginPath(vg_);
+    nvgRect(vg_, p.x, p.y, 2.5f, p.h);
+    nvgFillColor(vg_, col(cfg.doneTitle, 0.7f));
+    nvgFill(vg_);
+
+    // Title.
+    nvgFontFaceId(vg_, font_);
+    nvgFontSize(vg_, fontSize_ + 6.f);
+    nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+    nvgFillColor(vg_, col(cfg.doneTitle));
+    nvgText(vg_, L.titleBar.x + 16.f, L.titleBar.cy(), "DONE", nullptr);
+
+    // Autohide toggle button.
+    const Rect& b = L.pinButton;
+    nvgBeginPath(vg_);
+    nvgRoundedRect(vg_, b.x, b.y, b.w, b.h, 6.f);
+    nvgFillColor(vg_, col(cfg.doneCardFill, L.pinned ? 1.f : 0.5f));
+    nvgFill(vg_);
+    nvgStrokeColor(vg_, col(cfg.doneCardBorder));
+    nvgStrokeWidth(vg_, 1.2f);
+    nvgStroke(vg_);
+    nvgFontSize(vg_, fontSize_ - 5.f);
+    nvgTextAlign(vg_, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+    nvgFillColor(vg_, col(cfg.doneText));
+    nvgText(vg_, b.cx(), b.cy(), L.pinned ? "PINNED" : "PIN", nullptr);
+
+    // Cards (scissor-clipped to the scroll area).
+    nvgSave(vg_);
+    nvgScissor(vg_, p.x, L.contentClipTop, p.w, L.contentClipBottom - L.contentClipTop);
+    nvgFontSize(vg_, fontSize_);
+    for (const auto& [id, r] : cards) {
+        const Task* t = f.get(id);
+        if (!t) continue;
+        nvgBeginPath(vg_);
+        nvgRoundedRect(vg_, r.x, r.y, r.w, r.h, cfg.cornerRadius * 0.8f);
+        nvgFillColor(vg_, col(cfg.doneCardFill));
+        nvgFill(vg_);
+        nvgStrokeColor(vg_, col(cfg.doneCardBorder));
+        nvgStrokeWidth(vg_, 1.2f);
+        nvgStroke(vg_);
+        nvgFontFaceId(vg_, font_);
+        nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+        nvgFillColor(vg_, col(cfg.doneText));
+        nvgTextBox(vg_, r.x + 12.f, r.y + 10.f, r.w - 24.f, t->text.c_str(), end(t->text));
+    }
+    nvgRestore(vg_);
+}
+
 } // namespace tt

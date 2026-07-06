@@ -27,7 +27,8 @@ struct Task {
 class Forest {
 public:
     std::unordered_map<TaskId, Task> nodes;
-    std::vector<TaskId> roots;
+    std::vector<TaskId> roots;      // top-level tasks on the canvas
+    std::vector<TaskId> doneRoots;  // tasks moved to the DONE section (subtrees intact)
     TaskId nextId = 1;
 
     Task*       get(TaskId id)       { auto it = nodes.find(id); return it == nodes.end() ? nullptr : &it->second; }
@@ -51,6 +52,14 @@ public:
 
     // Remove a task and its whole subtree. Returns number of tasks removed.
     std::size_t removeSubtree(TaskId id);
+
+    // Move a task (with its subtree) off the canvas into the DONE section. Returns
+    // false if it is already there or invalid.
+    bool markDone(TaskId id);
+
+    // Bring a DONE task (with its subtree) back to the canvas as a root. Returns
+    // false if it is not in the DONE section.
+    bool restoreFromDone(TaskId id);
 
     // Rebuild `roots` and repair parent links after a bulk load: any task whose
     // parent is missing/invalid is promoted to a root (defensive against corruption).

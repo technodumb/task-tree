@@ -153,6 +153,22 @@ int main() {
         CHECK(f.size() == before - 2, "size shrank by 2");
     }
 
+    { // DONE section: markDone / restoreFromDone
+        Forest f;
+        TaskId a = f.addTask("a");
+        TaskId b = f.addTask("b", a);
+        CHECK(f.markDone(a), "markDone moves a off the canvas");
+        CHECK(f.get(a)->done, "a flagged done");
+        CHECK(std::find(f.roots.begin(), f.roots.end(), a) == f.roots.end(), "a left roots");
+        CHECK(std::find(f.doneRoots.begin(), f.doneRoots.end(), a) != f.doneRoots.end(), "a in doneRoots");
+        CHECK(f.get(b)->parent == a, "subtree stays intact under a done root");
+        CHECK(!f.markDone(a), "markDone twice is a no-op");
+        CHECK(f.restoreFromDone(a), "restoreFromDone brings a back");
+        CHECK(!f.get(a)->done, "a not done after restore");
+        CHECK(std::find(f.roots.begin(), f.roots.end(), a) != f.roots.end(), "a back on the canvas");
+        CHECK(f.doneRoots.empty(), "doneRoots empty after restore");
+    }
+
     std::printf("\n%d checks, %d failures\n", g_checks, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

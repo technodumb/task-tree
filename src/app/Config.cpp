@@ -50,6 +50,11 @@ Config loadConfig(const std::string& path) {
     c.edgeColor    = col("theme.edge", c.edgeColor);
     c.dropHint     = col("theme.drop_hint", c.dropHint);
     c.quickAddFill = col("theme.quick_add_fill", c.quickAddFill);
+    c.donePanelBg   = col("theme.done_panel_bg", c.donePanelBg);
+    c.doneCardFill  = col("theme.done_card_fill", c.doneCardFill);
+    c.doneCardBorder= col("theme.done_card_border", c.doneCardBorder);
+    c.doneText      = col("theme.done_text", c.doneText);
+    c.doneTitle     = col("theme.done_title", c.doneTitle);
 
     c.llmEnabled  = boolean("llm.enabled", c.llmEnabled);
     c.llmEndpoint = str("llm.endpoint", c.llmEndpoint);
@@ -82,7 +87,13 @@ bool saveConfig(const Config& c, const std::string& path) {
       << "node_text       = \"" << colorToHex(c.nodeText) << "\"\n"
       << "edge            = \"" << colorToHex(c.edgeColor) << "\"\n"
       << "drop_hint       = \"" << colorToHex(c.dropHint) << "\"\n"
-      << "quick_add_fill  = \"" << colorToHex(c.quickAddFill) << "\"\n\n"
+      << "quick_add_fill  = \"" << colorToHex(c.quickAddFill) << "\"\n"
+      << "# DONE section (greenish)\n"
+      << "done_panel_bg    = \"" << colorToHex(c.donePanelBg) << "\"\n"
+      << "done_card_fill   = \"" << colorToHex(c.doneCardFill) << "\"\n"
+      << "done_card_border = \"" << colorToHex(c.doneCardBorder) << "\"\n"
+      << "done_text        = \"" << colorToHex(c.doneText) << "\"\n"
+      << "done_title       = \"" << colorToHex(c.doneTitle) << "\"\n\n"
       << "[llm]\n"
       << "# Optional local classifier. When disabled, every new task is standalone.\n"
       << "# To enable: install ollama, `ollama pull " << c.llmModel << "`, set enabled = true.\n"

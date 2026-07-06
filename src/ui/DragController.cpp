@@ -90,6 +90,8 @@ void DragController::begin(TaskId id, Vec2 cursor, const Rect& nodeRect) {
     target_ = 0;
     insertIndex_ = 0;
     cursor_ = cursor;
+    startCursor_ = cursor;
+    moved_ = false;
     grabOffset_ = {cursor.x - nodeRect.x, cursor.y - nodeRect.y};
     ghost_ = nodeRect;
     dragWidth_ = nodeRect.w;
@@ -104,6 +106,19 @@ void DragController::update(Vec2 cursor, const Forest& f,
     ghost_.x = cursor.x - grabOffset_.x;
     ghost_.y = cursor.y - grabOffset_.y;
     if (auto it = rects.find(dragged_); it != rects.end()) dragWidth_ = it->second.w;
+
+    // Below the click threshold this is a click, not a drag: don't reparent/reflow.
+    if (!moved_) {
+        const float dx = cursor.x - startCursor_.x, dy = cursor.y - startCursor_.y;
+        if (dx * dx + dy * dy < 25.f) {
+            validTarget_ = false;
+            reflowOk_ = false;
+            slotTop_ = {};
+            targetBottom_ = {};
+            return;
+        }
+        moved_ = true;
+    }
 
     // Pick the hovered target: a node whose body (priority 2) or below-band (priority
     // 1) contains the cursor; nearest centre wins ties. Skip the dragged node and its
@@ -161,6 +176,7 @@ bool DragController::drop(Forest& f) {
 void DragController::cancel() {
     active_ = false;
     validTarget_ = false;
+    moved_ = false;
     dragged_ = 0;
     target_ = 0;
     insertIndex_ = 0;
