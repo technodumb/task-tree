@@ -61,10 +61,11 @@ public:
 
     void drawScrim(float w, float h, const Config& cfg);
 
-    // Draw all edges then all nodes. The dragged node (dv.dragged) is skipped here
-    // and drawn as a ghost; the drop target is highlighted.
+    // Draw all edges then all nodes, translated by the canvas `pan` offset. The
+    // dragged node (dv.dragged) is skipped here and drawn as a ghost; the drop target
+    // is highlighted.
     void drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>& rects,
-                  const Config& cfg, const DragVisual& dv);
+                  const Config& cfg, const DragVisual& dv, Vec2 pan);
 
     // The input widget. In quick-add mode it's a centred box with a drop shadow;
     // otherwise a bar at the bottom of the overlay.

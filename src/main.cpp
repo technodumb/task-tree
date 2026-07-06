@@ -130,6 +130,7 @@ int main() {
 
     std::fprintf(stderr, "TaskTree running. Toggle: %s   Quick-add: %s\n",
                  cfg.toggleHotkey.c_str(), cfg.quickAddHotkey.c_str());
+    std::fprintf(stderr, "Pan: middle-drag or Alt+left-drag. Double-click empty space to recenter.\n");
 
     // On-demand event loop: blocks (~0 CPU) when idle, wakes on input/hotkey.
     while (!glfwWindowShouldClose(win)) {

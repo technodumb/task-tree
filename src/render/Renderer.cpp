@@ -101,7 +101,9 @@ void Renderer::drawNode(const Rect& r, const std::string& text, const Config& cf
 }
 
 void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>& rects,
-                        const Config& cfg, const DragVisual& dv) {
+                        const Config& cfg, const DragVisual& dv, Vec2 pan) {
+    nvgSave(vg_);
+    nvgTranslate(vg_, pan.x, pan.y);
     auto rectOf = [&](TaskId id) -> const Rect* {
         auto it = rects.find(id);
         return it == rects.end() ? nullptr : &it->second;
@@ -144,6 +146,7 @@ void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>&
         const Task* t = f.get(dv.dragged);
         drawNode(dv.ghost, t ? t->text : std::string{}, cfg, false, 0.85f);
     }
+    nvgRestore(vg_);
 }
 
 void Renderer::drawInput(float screenW, float screenH, const std::string& text,

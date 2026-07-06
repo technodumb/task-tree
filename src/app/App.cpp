@@ -87,15 +87,28 @@ void App::onKey(int key, int action, int mods) {
     }
 }
 
-void App::onMouseButton(int button, int action, int /*mods*/) {
-    if (mode_ != Mode::Full || button != GLFW_MOUSE_BUTTON_LEFT) return;
+void App::onMouseButton(int button, int action, int mods) {
+    if (mode_ != Mode::Full) return;
+
+    // Pan the canvas: middle-drag, or Alt + left-drag.
+    if (button == GLFW_MOUSE_BUTTON_MIDDLE) {
+        if (action == GLFW_PRESS) { panning_ = true; panGrab_ = mouse_; panOrigin_ = pan_; }
+        else if (action == GLFW_RELEASE) panning_ = false;
+        return;
+    }
+    if (button != GLFW_MOUSE_BUTTON_LEFT) return;
+
     if (action == GLFW_PRESS) {
+        if (mods & GLFW_MOD_ALT) {
+            panning_ = true; panGrab_ = mouse_; panOrigin_ = pan_;
+            return;
+        }
         // Autohide toggle button.
         if (donePanel_.visible && donePanel_.pinButton.contains(mouse_.x, mouse_.y)) {
             pinned_ = !pinned_;
             return;
         }
-        // Double-click (same spot, within 400 ms) -> move to / from DONE.
+        // Double-click (same spot, within 400 ms).
         const double t = glfwGetTime();
         const bool dbl = (t - lastClickTime_ < 0.40) &&
                          std::fabs(mouse_.x - lastClickPos_.x) < 8.f &&
@@ -103,8 +116,8 @@ void App::onMouseButton(int button, int action, int /*mods*/) {
         lastClickTime_ = dbl ? 0.0 : t;
         lastClickPos_ = mouse_;
         if (dbl) { handleDoubleClick(); return; }
-        // Single press: in the DONE panel toggle a row's children; on the canvas start
-        // a drag.
+        // Single press: DONE panel toggles a row's children (screen space); the canvas
+        // starts a drag (world space).
         if (pointInPanel(mouse_)) {
             const TaskId id = hitTestDone(mouse_);
             if (id != 0) {
@@ -112,27 +125,31 @@ void App::onMouseButton(int button, int action, int /*mods*/) {
                 else                         doneExpanded_.insert(id);
             }
         } else {
-            const TaskId id = hitTest(mouse_);
+            const TaskId id = hitTest(worldMouse());
             if (id != 0) {
                 auto it = rects_.find(id);
-                if (it != rects_.end()) drag_.begin(id, mouse_, it->second);
+                if (it != rects_.end()) drag_.begin(id, worldMouse(), it->second);
             }
         }
     } else if (action == GLFW_RELEASE) {
+        if (panning_) { panning_ = false; return; }
         if (drag_.active() && drag_.drop(forest_)) { forceRelayout(); save(); }
     }
 }
 
 void App::onCursorPos(double x, double y) {
     mouse_ = {static_cast<float>(x), static_cast<float>(y)};
-    // Autohide reveal with hysteresis: reveal within the right 10%, keep visible while
-    // over the panel (right 15%), hide once the cursor moves left of the panel.
+    if (panning_) {
+        pan_ = {panOrigin_.x + (mouse_.x - panGrab_.x), panOrigin_.y + (mouse_.y - panGrab_.y)};
+        return;
+    }
+    // Autohide reveal with hysteresis.
     if (mode_ == Mode::Full && lastWinW_ > 0) {
         const float w = static_cast<float>(lastWinW_);
         if (mouse_.x >= w * 0.85f) doneHover_ = true;        // within the right 15%
         else if (mouse_.x < w * 0.83f) doneHover_ = false;   // 17% out from the right
     }
-    if (drag_.active()) drag_.update(mouse_, forest_, rects_, params_);
+    if (drag_.active()) drag_.update(worldMouse(), forest_, rects_, params_);
 }
 
 void App::onScroll(double /*dx*/, double dy) {
@@ -233,7 +250,7 @@ void App::drawScene(int winW, int winH, float dpr) {
         renderer_.drawScrim(static_cast<float>(winW), static_cast<float>(winH), cfg_);
         DragVisual dv = buildDragVisual();
         const auto& drawRects = dv.active ? previewRects_ : rects_;
-        renderer_.drawTree(forest_, drawRects, cfg_, dv);
+        renderer_.drawTree(forest_, drawRects, cfg_, dv, pan_);
         if (donePanel_.visible)
             renderer_.drawDonePanel(donePanel_, forest_, doneRows_, cfg_);
         renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(), cfg_, false);
@@ -335,10 +352,12 @@ void App::handleDoubleClick() {
             save();
         }
     } else {
-        const TaskId id = hitTest(mouse_);
+        const TaskId id = hitTest(worldMouse());
         if (id != 0) {
             if (drag_.active()) drag_.cancel();
             if (forest_.markDone(id)) { forceRelayout(); save(); }
+        } else {
+            pan_ = {0.f, 0.f}; // double-click empty canvas recenters the view
         }
     }
 }
