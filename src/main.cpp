@@ -11,6 +11,7 @@
 #include <GLFW/glfw3.h>
 
 #include <nanovg.h>
+#define NANOVG_GL3   // select the GL3 backend so nvgCreateGL3/nvgDeleteGL3 are declared
 #include <nanovg_gl.h>
 
 #include "app/App.hpp"
