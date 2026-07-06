@@ -5,6 +5,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "app/Config.hpp"
 #include "layout/Geometry.hpp"
@@ -37,6 +38,15 @@ struct DonePanelLayout {
     float contentClipBottom = 0.f;
 };
 
+// One visible row in the DONE panel's expandable, indented tree.
+struct DoneRow {
+    TaskId id = 0;
+    Rect   rect;              // full clickable row rect (already indented + scrolled)
+    int    depth = 0;
+    bool   hasChildren = false;
+    bool   expanded = false;
+};
+
 class Renderer {
 public:
     bool init(NVGcontext* vg, const std::string& fontPath);
@@ -62,10 +72,10 @@ public:
                    std::size_t caretByte, bool caretOn, const Config& cfg,
                    bool quickAddMode);
 
-    // The DONE side panel: greenish background, "DONE" title, autohide toggle, and a
-    // (scissor-clipped, already scroll-positioned) list of done-item cards.
+    // The DONE side panel: translucent green tint, "DONE" title, autohide toggle, and
+    // a scissor-clipped, indented, expandable list of done rows (no card borders).
     void drawDonePanel(const DonePanelLayout& layout, const Forest& f,
-                       const std::unordered_map<TaskId, Rect>& cards, const Config& cfg);
+                       const std::vector<DoneRow>& rows, const Config& cfg);
 
     // Wrapped height of `text` at the given content width (for card sizing).
     float measureTextHeight(const std::string& text, float width) const;

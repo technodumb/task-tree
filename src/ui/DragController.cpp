@@ -144,13 +144,9 @@ void DragController::update(Vec2 cursor, const Forest& f,
     target_ = best; // 0 => root level
     validTarget_ = true;
 
+    // No in-node ordering for now: a dropped node always appends to the rightmost slot.
     const std::vector<TaskId> kids = siblingsExcludingDragged(f, target_, dragged_);
-    int idx = 0;
-    for (TaskId s : kids) {
-        auto it = rects.find(s);
-        if (it != rects.end() && it->second.cx() < cursor.x) ++idx;
-    }
-    insertIndex_ = idx;
+    insertIndex_ = static_cast<int>(kids.size());
 
     // Compute the reflow (fixed target, children re-centred with a gap slot).
     const Reflow rf = computeReflow(target_, dragged_, insertIndex_, dragWidth_, f, rects, params);

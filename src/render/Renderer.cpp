@@ -215,17 +215,17 @@ float Renderer::measureTextHeight(const std::string& text, float width) const {
 }
 
 void Renderer::drawDonePanel(const DonePanelLayout& L, const Forest& f,
-                             const std::unordered_map<TaskId, Rect>& cards, const Config& cfg) {
+                             const std::vector<DoneRow>& rows, const Config& cfg) {
     const Rect& p = L.panel;
 
-    // Panel background + a brighter left edge to read as a distinct surface.
+    // Just a translucent green tint (no border) + a subtle brighter left edge.
     nvgBeginPath(vg_);
     nvgRect(vg_, p.x, p.y, p.w, p.h);
     nvgFillColor(vg_, col(cfg.donePanelBg));
     nvgFill(vg_);
     nvgBeginPath(vg_);
-    nvgRect(vg_, p.x, p.y, 2.5f, p.h);
-    nvgFillColor(vg_, col(cfg.doneTitle, 0.7f));
+    nvgRect(vg_, p.x, p.y, 2.f, p.h);
+    nvgFillColor(vg_, col(cfg.doneTitle, 0.55f));
     nvgFill(vg_);
 
     // Title.
@@ -235,38 +235,47 @@ void Renderer::drawDonePanel(const DonePanelLayout& L, const Forest& f,
     nvgFillColor(vg_, col(cfg.doneTitle));
     nvgText(vg_, L.titleBar.x + 16.f, L.titleBar.cy(), "DONE", nullptr);
 
-    // Autohide toggle button.
+    // Autohide toggle button (kept as a small pill so it reads as clickable).
     const Rect& b = L.pinButton;
     nvgBeginPath(vg_);
     nvgRoundedRect(vg_, b.x, b.y, b.w, b.h, 6.f);
-    nvgFillColor(vg_, col(cfg.doneCardFill, L.pinned ? 1.f : 0.5f));
+    nvgFillColor(vg_, col(cfg.doneCardFill, L.pinned ? 0.95f : 0.4f));
     nvgFill(vg_);
-    nvgStrokeColor(vg_, col(cfg.doneCardBorder));
-    nvgStrokeWidth(vg_, 1.2f);
-    nvgStroke(vg_);
     nvgFontSize(vg_, fontSize_ - 5.f);
     nvgTextAlign(vg_, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
     nvgFillColor(vg_, col(cfg.doneText));
     nvgText(vg_, b.cx(), b.cy(), L.pinned ? "PINNED" : "PIN", nullptr);
 
-    // Cards (scissor-clipped to the scroll area).
+    // Rows: chevron (if it has children) + indented text. No boxes, no borders.
     nvgSave(vg_);
     nvgScissor(vg_, p.x, L.contentClipTop, p.w, L.contentClipBottom - L.contentClipTop);
-    nvgFontSize(vg_, fontSize_);
-    for (const auto& [id, r] : cards) {
-        const Task* t = f.get(id);
+    for (const DoneRow& row : rows) {
+        const Task* t = f.get(row.id);
         if (!t) continue;
-        nvgBeginPath(vg_);
-        nvgRoundedRect(vg_, r.x, r.y, r.w, r.h, cfg.cornerRadius * 0.8f);
-        nvgFillColor(vg_, col(cfg.doneCardFill));
-        nvgFill(vg_);
-        nvgStrokeColor(vg_, col(cfg.doneCardBorder));
-        nvgStrokeWidth(vg_, 1.2f);
-        nvgStroke(vg_);
+        const Rect& r = row.rect;
+        const float chevX = r.x + 3.f;
+        const float cy = r.y + 12.f;
+        if (row.hasChildren) {
+            nvgBeginPath(vg_);
+            if (row.expanded) { // down-pointing
+                nvgMoveTo(vg_, chevX, cy - 3.f);
+                nvgLineTo(vg_, chevX + 8.f, cy - 3.f);
+                nvgLineTo(vg_, chevX + 4.f, cy + 3.f);
+            } else {            // right-pointing
+                nvgMoveTo(vg_, chevX, cy - 4.f);
+                nvgLineTo(vg_, chevX + 6.f, cy);
+                nvgLineTo(vg_, chevX, cy + 4.f);
+            }
+            nvgFillColor(vg_, col(cfg.doneTitle));
+            nvgFill(vg_);
+        }
+        const float textX = r.x + 16.f;
         nvgFontFaceId(vg_, font_);
+        nvgFontSize(vg_, fontSize_);
         nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
-        nvgFillColor(vg_, col(cfg.doneText));
-        nvgTextBox(vg_, r.x + 12.f, r.y + 10.f, r.w - 24.f, t->text.c_str(), end(t->text));
+        nvgFillColor(vg_, col(cfg.doneText, row.depth == 0 ? 1.f : 0.85f));
+        nvgTextBox(vg_, textX, r.y + 6.f, std::max(20.f, r.right() - textX - 8.f),
+                   t->text.c_str(), end(t->text));
     }
     nvgRestore(vg_);
 }

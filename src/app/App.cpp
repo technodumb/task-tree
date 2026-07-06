@@ -103,8 +103,15 @@ void App::onMouseButton(int button, int action, int /*mods*/) {
         lastClickTime_ = dbl ? 0.0 : t;
         lastClickPos_ = mouse_;
         if (dbl) { handleDoubleClick(); return; }
-        // Single press begins a drag, but only on the canvas (not the DONE panel).
-        if (!pointInPanel(mouse_)) {
+        // Single press: in the DONE panel toggle a row's children; on the canvas start
+        // a drag.
+        if (pointInPanel(mouse_)) {
+            const TaskId id = hitTestDone(mouse_);
+            if (id != 0) {
+                if (doneExpanded_.count(id)) doneExpanded_.erase(id);
+                else                         doneExpanded_.insert(id);
+            }
+        } else {
             const TaskId id = hitTest(mouse_);
             if (id != 0) {
                 auto it = rects_.find(id);
@@ -122,8 +129,8 @@ void App::onCursorPos(double x, double y) {
     // over the panel (right 15%), hide once the cursor moves left of the panel.
     if (mode_ == Mode::Full && lastWinW_ > 0) {
         const float w = static_cast<float>(lastWinW_);
-        if (mouse_.x >= w * 0.90f) doneHover_ = true;
-        else if (mouse_.x < w * 0.85f) doneHover_ = false;
+        if (mouse_.x >= w * 0.85f) doneHover_ = true;        // within the right 15%
+        else if (mouse_.x < w * 0.83f) doneHover_ = false;   // 17% out from the right
     }
     if (drag_.active()) drag_.update(mouse_, forest_, rects_, params_);
 }
@@ -214,9 +221,9 @@ DragVisual App::buildDragVisual() {
 void App::drawScene(int winW, int winH, float dpr) {
     lastWinW_ = winW;
     lastWinH_ = winH;
-    // Reserve the right 15% for the DONE panel; centre the forest in the rest
-    // (roots -> top-centre of the canvas area).
-    const float cw = winW * 0.85f;
+    // Centre the forest across the full window (roots -> true top-centre). The DONE
+    // panel is translucent and autohides, so it overlays rather than reserving space.
+    const float cw = static_cast<float>(winW);
     if (params_.centerWidth != cw) { params_.centerWidth = cw; needsRelayout_ = true; }
     relayoutIfNeeded();
     layoutDonePanel(winW, winH);
@@ -228,7 +235,7 @@ void App::drawScene(int winW, int winH, float dpr) {
         const auto& drawRects = dv.active ? previewRects_ : rects_;
         renderer_.drawTree(forest_, drawRects, cfg_, dv);
         if (donePanel_.visible)
-            renderer_.drawDonePanel(donePanel_, forest_, doneRects_, cfg_);
+            renderer_.drawDonePanel(donePanel_, forest_, doneRows_, cfg_);
         renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(), cfg_, false);
     } else if (mode_ == Mode::QuickAdd) {
         renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(), cfg_, true);
@@ -251,27 +258,59 @@ void App::layoutDonePanel(int winW, int winH) {
     donePanel_ = L;
 
     // Measure card heights, clamp scroll, then position (screen coords, scrolled).
-    const float pad = 12.f, gap = 10.f;
-    const float cardW = pw - 2 * pad;
-    std::vector<std::pair<TaskId, float>> heights;
+    // Flatten the expanded DONE tree in display order (pre-order) with depth.
+    std::vector<std::pair<TaskId, int>> flat;
+    {
+        std::vector<std::pair<TaskId, int>> stack;
+        for (auto it = forest_.doneRoots.rbegin(); it != forest_.doneRoots.rend(); ++it)
+            stack.emplace_back(*it, 0);
+        while (!stack.empty()) {
+            const auto [id, depth] = stack.back();
+            stack.pop_back();
+            const Task* t = forest_.get(id);
+            if (!t) continue;
+            flat.emplace_back(id, depth);
+            if (doneExpanded_.count(id))
+                for (auto cit = t->children.rbegin(); cit != t->children.rend(); ++cit)
+                    stack.emplace_back(*cit, depth + 1);
+        }
+    }
+
+    const float pad = 12.f, gap = 8.f, indent = 16.f;
+    auto rowX = [&](int depth) { return L.panel.x + pad + depth * indent; };
+    auto textW = [&](int depth) { return std::max(30.f, L.panel.right() - 8.f - (rowX(depth) + 16.f)); };
+
+    // Measure heights.
+    std::vector<float> heights;
+    heights.reserve(flat.size());
     float totalH = 0.f;
-    for (TaskId id : forest_.doneRoots) {
+    for (const auto& [id, depth] : flat) {
         const Task* t = forest_.get(id);
-        if (!t) continue;
-        float h = renderer_.measureTextHeight(t->text, cardW - 24.f) + 20.f;
-        h = std::max(h, 40.f);
-        heights.emplace_back(id, h);
+        float h = renderer_.measureTextHeight(t ? t->text : std::string{}, textW(depth)) + 12.f;
+        h = std::max(h, 28.f);
+        heights.push_back(h);
         totalH += h + gap;
     }
     const float visibleH = L.contentClipBottom - L.contentClipTop;
     doneMaxScroll_ = std::max(0.f, totalH - visibleH);
     scrollY_ = std::max(0.f, std::min(scrollY_, doneMaxScroll_));
 
-    doneRects_.clear();
+    // Position rows.
+    doneRows_.clear();
+    doneRows_.reserve(flat.size());
     float y = L.contentClipTop - scrollY_;
-    for (const auto& [id, h] : heights) {
-        doneRects_[id] = Rect{L.panel.x + pad, y, cardW, h};
-        y += h + gap;
+    for (std::size_t i = 0; i < flat.size(); ++i) {
+        const TaskId id = flat[i].first;
+        const int depth = flat[i].second;
+        const Task* t = forest_.get(id);
+        DoneRow row;
+        row.id = id;
+        row.depth = depth;
+        row.hasChildren = t && !t->children.empty();
+        row.expanded = doneExpanded_.count(id) != 0;
+        row.rect = Rect{rowX(depth), y, L.panel.right() - 8.f - rowX(depth), heights[i]};
+        doneRows_.push_back(row);
+        y += heights[i] + gap;
     }
 }
 
@@ -282,15 +321,19 @@ bool App::pointInPanel(Vec2 p) const {
 TaskId App::hitTestDone(Vec2 p) const {
     if (!pointInPanel(p)) return 0;
     if (p.y < donePanel_.contentClipTop || p.y > donePanel_.contentClipBottom) return 0;
-    for (const auto& [id, r] : doneRects_)
-        if (r.contains(p.x, p.y)) return id;
+    for (const DoneRow& row : doneRows_)
+        if (row.rect.contains(p.x, p.y)) return row.id;
     return 0;
 }
 
 void App::handleDoubleClick() {
     if (pointInPanel(mouse_)) {
         const TaskId id = hitTestDone(mouse_);
-        if (id != 0 && forest_.restoreFromDone(id)) { forceRelayout(); save(); }
+        if (id != 0 && forest_.restoreFromDone(id)) {
+            doneExpanded_.erase(id);
+            forceRelayout();
+            save();
+        }
     } else {
         const TaskId id = hitTest(mouse_);
         if (id != 0) {

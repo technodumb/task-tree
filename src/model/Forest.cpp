@@ -98,11 +98,11 @@ bool Forest::markDone(TaskId id) {
 }
 
 bool Forest::restoreFromDone(TaskId id) {
-    auto it = std::find(doneRoots.begin(), doneRoots.end(), id);
-    if (it == doneRoots.end()) return false;
-    doneRoots.erase(it);
     Task* t = get(id);
     if (!t) return false;
+    auto it = std::find(doneRoots.begin(), doneRoots.end(), id);
+    if (it != doneRoots.end()) doneRoots.erase(it);
+    else detachFromParent(id); // a descendant expanded inside a done subtree
     t->done = false;
     t->parent = kNoParent;
     roots.push_back(id);

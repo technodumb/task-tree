@@ -30,12 +30,12 @@ struct Config {
     Color dropHint    {0.40f, 0.80f, 0.55f, 0.95f}; // preview edge / gap cue
     Color quickAddFill{0.14f, 0.16f, 0.20f, 0.98f};
 
-    // DONE section (greenish)
-    Color donePanelBg  {0.04f, 0.13f, 0.08f, 0.93f};
-    Color doneCardFill {0.09f, 0.22f, 0.14f, 0.98f};
-    Color doneCardBorder{0.28f, 0.68f, 0.44f, 1.f};
+    // DONE section (greenish, translucent tint — no card borders)
+    Color donePanelBg  {0.05f, 0.15f, 0.09f, 0.55f};
+    Color doneCardFill {0.15f, 0.32f, 0.20f, 0.90f}; // used only for the PIN button
+    Color doneCardBorder{0.28f, 0.68f, 0.44f, 1.f};  // used only for the PIN button
     Color doneText     {0.86f, 0.97f, 0.89f, 1.f};
-    Color doneTitle    {0.50f, 0.92f, 0.64f, 1.f};
+    Color doneTitle    {0.55f, 0.94f, 0.68f, 1.f};
 
     // local LLM classifier (disabled by default)
     bool        llmEnabled  = false;

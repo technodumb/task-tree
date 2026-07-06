@@ -6,6 +6,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -89,7 +90,8 @@ private:
     float doneMaxScroll_ = 0.f;
     int   lastWinW_ = 0, lastWinH_ = 0;
     DonePanelLayout donePanel_;
-    std::unordered_map<TaskId, Rect> doneRects_; // card rects (screen coords)
+    std::vector<DoneRow> doneRows_;               // visible, indented DONE rows
+    std::unordered_set<TaskId> doneExpanded_;     // which DONE nodes show their children
     double lastClickTime_ = 0.0;
     Vec2   lastClickPos_;
 
