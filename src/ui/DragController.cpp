@@ -1,5 +1,6 @@
 #include "ui/DragController.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <vector>
 
@@ -24,6 +25,62 @@ void translateSubtree(std::unordered_map<TaskId, Rect>& r, const Forest& f, Task
         for (TaskId c : t->children) translateSubtree(r, f, c, dx);
 }
 
+// Arrange the target's children (excluding the dragged node) plus a gap slot of
+// width `dragWidth` at `insertIndex`, centred horizontally under the target's fixed
+// position. Returns the new centre-x for each child, the slot centre, and the child
+// layer y. `ok` is false at the root level (target == 0) — the root layer never
+// reflows, so nudging a node in empty space doesn't move the tree.
+struct Reflow {
+    bool ok = false;
+    std::unordered_map<TaskId, float> kidCenter;
+    float slotCenterX = 0.f;
+    float layerY = 0.f;
+};
+
+Reflow computeReflow(TaskId target, TaskId dragged, int insertIndex, float dragWidth,
+                     const Forest& f, const std::unordered_map<TaskId, Rect>& base,
+                     const LayoutParams& params) {
+    Reflow r;
+    if (target == kNoParent) return r; // root level: no reflow
+    auto trIt = base.find(target);
+    if (trIt == base.end()) return r;
+    const float centerX = trIt->second.cx();
+
+    const std::vector<TaskId> kids = siblingsExcludingDragged(f, target, dragged);
+    const int n = static_cast<int>(kids.size());
+
+    if (n == 0) {
+        r.layerY = trIt->second.bottom() + params.vGap;
+    } else {
+        auto it0 = base.find(kids[0]);
+        r.layerY = (it0 != base.end()) ? it0->second.y : trIt->second.bottom() + params.vGap;
+    }
+
+    auto widthOf = [&](TaskId id) {
+        auto it = base.find(id);
+        return it != base.end() ? it->second.w : params.defaultSize.w;
+    };
+
+    // Total width of (n children + 1 slot) with n gaps between the n+1 items.
+    float totalW = dragWidth + params.hGap * n;
+    for (TaskId k : kids) totalW += widthOf(k);
+
+    const int k = std::max(0, std::min(insertIndex, n));
+    float x = centerX - totalW * 0.5f; // centre the row under the fixed target
+    auto place = [&](float w, TaskId id) {
+        const float c = x + w * 0.5f;
+        if (id == kNoParent) r.slotCenterX = c;
+        else                 r.kidCenter[id] = c;
+        x += w + params.hGap;
+    };
+    for (int i = 0; i <= n; ++i) {
+        if (i == k) place(dragWidth, kNoParent); // the gap slot
+        if (i < n)  place(widthOf(kids[i]), kids[i]);
+    }
+    r.ok = true;
+    return r;
+}
+
 } // namespace
 
 void DragController::begin(TaskId id, Vec2 cursor, const Rect& nodeRect) {
@@ -36,7 +93,8 @@ void DragController::begin(TaskId id, Vec2 cursor, const Rect& nodeRect) {
     grabOffset_ = {cursor.x - nodeRect.x, cursor.y - nodeRect.y};
     ghost_ = nodeRect;
     dragWidth_ = nodeRect.w;
-    gap_ = 0.f;
+    reflowOk_ = false;
+    reflowKidCenter_.clear();
 }
 
 void DragController::update(Vec2 cursor, const Forest& f,
@@ -46,7 +104,6 @@ void DragController::update(Vec2 cursor, const Forest& f,
     ghost_.x = cursor.x - grabOffset_.x;
     ghost_.y = cursor.y - grabOffset_.y;
     if (auto it = rects.find(dragged_); it != rects.end()) dragWidth_ = it->second.w;
-    gap_ = dragWidth_ + params.hGap;
 
     // Pick the hovered target: a node whose body (priority 2) or below-band (priority
     // 1) contains the cursor; nearest centre wins ties. Skip the dragged node and its
@@ -80,42 +137,17 @@ void DragController::update(Vec2 cursor, const Forest& f,
     }
     insertIndex_ = idx;
 
-    computeSlot(f, rects, params);
-}
-
-void DragController::computeSlot(const Forest& f, const std::unordered_map<TaskId, Rect>& rects,
-                                 const LayoutParams& params) {
+    // Compute the reflow (fixed target, children re-centred with a gap slot).
+    const Reflow rf = computeReflow(target_, dragged_, insertIndex_, dragWidth_, f, rects, params);
+    reflowOk_ = rf.ok;
+    reflowKidCenter_ = rf.kidCenter;
     targetBottom_ = {};
     slotTop_ = {};
     if (target_ != 0) {
-        auto tr = rects.find(target_);
-        if (tr != rects.end()) targetBottom_ = {tr->second.cx(), tr->second.bottom()};
+        if (auto it = rects.find(target_); it != rects.end())
+            targetBottom_ = {it->second.cx(), it->second.bottom()};
     }
-
-    const std::vector<TaskId> kids = siblingsExcludingDragged(f, target_, dragged_);
-    float layerY, slotLeft;
-    if (kids.empty()) {
-        // Gap sits directly below the (childless) target.
-        const auto tr = rects.find(target_);
-        const float baseY = (tr != rects.end()) ? tr->second.bottom() : params.topMargin;
-        const float baseX = (tr != rects.end()) ? tr->second.cx() : params.centerWidth * 0.5f;
-        layerY = (target_ == 0) ? params.topMargin : baseY + params.vGap;
-        slotLeft = baseX - dragWidth_ * 0.5f;
-    } else {
-        const int k = insertIndex_;
-        auto first = rects.find(kids.front());
-        layerY = (first != rects.end()) ? first->second.y : params.topMargin;
-        if (k <= 0) {
-            slotLeft = (first != rects.end()) ? first->second.left() : 0.f;
-        } else if (k >= static_cast<int>(kids.size())) {
-            auto last = rects.find(kids.back());
-            slotLeft = (last != rects.end()) ? last->second.right() + params.hGap : 0.f;
-        } else {
-            auto prev = rects.find(kids[k - 1]);
-            slotLeft = (prev != rects.end()) ? prev->second.right() + params.hGap : 0.f;
-        }
-    }
-    slotTop_ = {slotLeft + dragWidth_ * 0.5f, layerY};
+    if (rf.ok) slotTop_ = {rf.slotCenterX, rf.layerY};
 }
 
 bool DragController::drop(Forest& f) {
@@ -132,19 +164,21 @@ void DragController::cancel() {
     dragged_ = 0;
     target_ = 0;
     insertIndex_ = 0;
-    gap_ = 0.f;
+    reflowOk_ = false;
+    reflowKidCenter_.clear();
 }
 
 std::unordered_map<TaskId, Rect> DragController::previewLayout(
     const Forest& f, const std::unordered_map<TaskId, Rect>& base) const {
     std::unordered_map<TaskId, Rect> result = base;
-    if (!active_ || !validTarget_) return result;
+    if (!active_ || !validTarget_ || !reflowOk_) return result; // root level -> tree frozen
 
-    // Open a gap: shift the target's children at index >= insertIndex (and their whole
-    // subtrees) right by gap_. Nothing else moves.
-    const std::vector<TaskId> kids = siblingsExcludingDragged(f, target_, dragged_);
-    for (std::size_t i = static_cast<std::size_t>(std::max(0, insertIndex_)); i < kids.size(); ++i)
-        translateSubtree(result, f, kids[i], gap_);
+    // Slide each of the target's children (and its subtree) to its re-centred position.
+    for (const auto& [id, newCenter] : reflowKidCenter_) {
+        auto it = base.find(id);
+        if (it == base.end()) continue;
+        translateSubtree(result, f, id, newCenter - it->second.cx());
+    }
     return result;
 }
 

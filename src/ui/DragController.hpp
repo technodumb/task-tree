@@ -47,9 +47,6 @@ public:
         const Forest& f, const std::unordered_map<TaskId, Rect>& base) const;
 
 private:
-    void computeSlot(const Forest& f, const std::unordered_map<TaskId, Rect>& rects,
-                     const LayoutParams& params);
-
     bool   active_ = false;
     bool   validTarget_ = false;
     TaskId dragged_ = 0;
@@ -62,7 +59,11 @@ private:
     Vec2   targetBottom_;     // preview edge start (target bottom-centre)
     Vec2   slotTop_;          // preview edge end (opened-gap centre, child layer)
     float  dragWidth_ = 0.f;  // width of the dragged node (from base rects)
-    float  gap_ = 0.f;        // horizontal space reserved for the incoming node
+
+    // Reflow of the target's children (re-centred under the fixed target with a gap
+    // slot at insertIndex). Empty/false when hovering the root level -> no reflow.
+    bool   reflowOk_ = false;
+    std::unordered_map<TaskId, float> reflowKidCenter_; // new centre-x per child
 };
 
 } // namespace tt
