@@ -152,7 +152,8 @@ void Renderer::drawInput(float screenW, float screenH, const std::string& text,
     const float boxW = std::min(620.f, std::max(360.f, screenW * 0.5f));
     const float boxH = fontSize_ + 2 * padY_ + 10.f;
     const float bx = (screenW - boxW) * 0.5f;
-    const float by = quickAddMode ? (screenH * 0.42f) : 48.f;
+    // Full overlay: input pinned to the bottom-centre. Quick-add: floating box ~centre.
+    const float by = quickAddMode ? (screenH * 0.42f) : (screenH - boxH - 40.f);
     const float r = cfg.cornerRadius;
 
     // Drop shadow (mainly for quick-add, where there is no scrim behind it).

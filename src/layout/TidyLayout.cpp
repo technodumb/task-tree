@@ -149,10 +149,20 @@ std::unordered_map<TaskId, Rect> computeLayout(const Forest& forest,
     for (std::size_t d = 1; d < layerY.size(); ++d)
         layerY[d] = layerY[d - 1] + layerMaxH[d - 1] + params.vGap;
 
-    // Normalise so the leftmost node's left edge sits at leftMargin.
-    float minLeft = kBig;
-    for (const auto& [id, ax] : absX) minLeft = std::min(minLeft, ax - w.sizeOf(id).w * 0.5f);
-    const float shiftX = params.leftMargin - minLeft;
+    // Horizontal placement: centre the forest within centerWidth when it fits,
+    // otherwise left-align at leftMargin.
+    float minLeft = kBig, maxRight = -kBig;
+    for (const auto& [id, ax] : absX) {
+        const float hw = w.sizeOf(id).w * 0.5f;
+        minLeft = std::min(minLeft, ax - hw);
+        maxRight = std::max(maxRight, ax + hw);
+    }
+    float targetLeft = params.leftMargin;
+    if (params.centerWidth > 0.f) {
+        const float treeW = maxRight - minLeft;
+        targetLeft = std::max(params.leftMargin, (params.centerWidth - treeW) * 0.5f);
+    }
+    const float shiftX = targetLeft - minLeft;
 
     out.reserve(absX.size());
     for (const auto& [id, ax] : absX) {

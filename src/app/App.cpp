@@ -100,7 +100,7 @@ void App::onMouseButton(int button, int action, int /*mods*/) {
 
 void App::onCursorPos(double x, double y) {
     mouse_ = {static_cast<float>(x), static_cast<float>(y)};
-    if (drag_.active()) drag_.update(mouse_, forest_, rects_, params_.vGap);
+    if (drag_.active()) drag_.update(mouse_, forest_, rects_, params_);
 }
 
 // ---- task creation + classification ----------------------------------------
@@ -166,25 +166,26 @@ void App::relayoutIfNeeded() {
 DragVisual App::buildDragVisual() {
     DragVisual dv;
     if (!drag_.active()) return dv;
-    previewRects_ = drag_.previewLayout(forest_, sizes_, params_, rects_);
+    previewRects_ = drag_.previewLayout(forest_, rects_);
     dv.active = true;
     dv.dragged = drag_.dragged();
     dv.target = drag_.target();
     dv.validTarget = drag_.validTarget();
     dv.ghost = drag_.ghost();
     if (dv.validTarget && dv.target != 0) {
-        auto t = previewRects_.find(dv.target);
-        auto d = previewRects_.find(dv.dragged);
-        if (t != previewRects_.end() && d != previewRects_.end()) {
-            dv.fromPoint = {t->second.cx(), t->second.bottom()};
-            dv.toPoint = {d->second.cx(), d->second.top()};
-            dv.showPreviewEdge = true;
-        }
+        dv.fromPoint = drag_.targetBottom();
+        dv.toPoint = drag_.slotTop();
+        dv.showPreviewEdge = true;
     }
     return dv;
 }
 
 void App::drawScene(int winW, int winH, float dpr) {
+    // Centre the forest horizontally within the window (roots -> top-centre).
+    if (params_.centerWidth != static_cast<float>(winW)) {
+        params_.centerWidth = static_cast<float>(winW);
+        needsRelayout_ = true;
+    }
     relayoutIfNeeded();
     renderer_.beginFrame(winW, winH, dpr);
     if (mode_ == Mode::Full) {

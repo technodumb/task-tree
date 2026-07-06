@@ -1,8 +1,11 @@
 #pragma once
-// Drag & drop reparenting. The drop region for a target node is its box PLUS a band
-// directly below it. While hovering, previewLayout() reflows siblings to open a gap
-// at the computed insertion index (without mutating the forest). Dropping applies
-// the reparent (with cycle prevention) and the tree snaps to its new layout.
+// Drag & drop reparenting.
+//
+// Stability: while dragging, the tree is NOT re-laid-out. Every node stays at its
+// committed position — the target and everything above/beside it does not move — and
+// only the target's existing children shift horizontally to open a gap for the
+// incoming node. The full re-layout (and re-centering) happens once, on drop. This
+// keeps the drop target still while you aim for it.
 
 #include <unordered_map>
 
@@ -22,25 +25,31 @@ public:
     Vec2   cursor() const { return cursor_; }
     const Rect& ghost() const { return ghost_; }
 
+    // Preview edge endpoints (valid after update() when validTarget && target != 0).
+    Vec2 targetBottom() const { return targetBottom_; }
+    Vec2 slotTop() const { return slotTop_; }
+
     // Start dragging node `id`; `nodeRect` is its current laid-out rectangle.
     void begin(TaskId id, Vec2 cursor, const Rect& nodeRect);
 
-    // Recompute ghost position, hovered target, and insertion index on cursor move.
-    // `dropBandH` is how far below a node its drop region extends.
+    // Recompute ghost position, hovered target, insertion index, and slot geometry on
+    // cursor move. Uses the committed `rects` (which stay fixed during the drag).
     void update(Vec2 cursor, const Forest& f,
-                const std::unordered_map<TaskId, Rect>& rects, float dropBandH);
+                const std::unordered_map<TaskId, Rect>& rects, const LayoutParams& params);
 
     // Apply the pending move. Returns true if the forest changed.
     bool drop(Forest& f);
     void cancel();
 
-    // Layout with the dragged node virtually reparented to the hovered slot, so
-    // siblings open a gap. Returns `base` unchanged when there is no valid target.
+    // The committed layout with only the target's children[insertIndex..] shifted
+    // right to open a gap. Everything else keeps its `base` position. No full re-layout.
     std::unordered_map<TaskId, Rect> previewLayout(
-        const Forest& f, const std::unordered_map<TaskId, Size>& sizes,
-        const LayoutParams& params, const std::unordered_map<TaskId, Rect>& base) const;
+        const Forest& f, const std::unordered_map<TaskId, Rect>& base) const;
 
 private:
+    void computeSlot(const Forest& f, const std::unordered_map<TaskId, Rect>& rects,
+                     const LayoutParams& params);
+
     bool   active_ = false;
     bool   validTarget_ = false;
     TaskId dragged_ = 0;
@@ -49,6 +58,11 @@ private:
     Vec2   cursor_;
     Vec2   grabOffset_;       // cursor - node top-left at pickup
     Rect   ghost_;
+
+    Vec2   targetBottom_;     // preview edge start (target bottom-centre)
+    Vec2   slotTop_;          // preview edge end (opened-gap centre, child layer)
+    float  dragWidth_ = 0.f;  // width of the dragged node (from base rects)
+    float  gap_ = 0.f;        // horizontal space reserved for the incoming node
 };
 
 } // namespace tt

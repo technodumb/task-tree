@@ -19,7 +19,10 @@ struct LayoutParams {
     float hGap = 28.f;       // minimum horizontal gap between node boxes
     float vGap = 52.f;       // vertical gap between layers
     float topMargin = 48.f;  // y of the first (root) layer
-    float leftMargin = 48.f; // x the leftmost node is normalised to
+    float leftMargin = 48.f; // min x of the leftmost node
+    // When > 0, the whole forest is centred horizontally within [0, centerWidth]
+    // (roots end up at top-centre). Falls back to leftMargin if the tree is wider.
+    float centerWidth = 0.f;
     Size  defaultSize{160.f, 44.f}; // used when a node has no measured size
 };
 
