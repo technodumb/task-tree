@@ -11,6 +11,16 @@ CMakeFiles/
 cmake_install.cmake
 _deps/
 
+# In-source build artifacts (if you run `cmake .` in the repo root instead of -B build)
+/Makefile
+/CTestTestfile.cmake
+/Testing/
+/gladsources/
+/*.a
+/tasktree
+/core_tests
+/store_tests
+
 # Editors
 .vscode/
 .idea/
