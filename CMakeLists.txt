@@ -9,6 +9,15 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Size: put each function/data item in its own section and let the linker drop the
+# unused ones (trims the header-only deps, esp. httplib). Strip symbols in Release
+# only, so RelWithDebInfo stays debuggable. Ship with -DCMAKE_BUILD_TYPE=Release.
+if(NOT MSVC)
+    add_compile_options(-ffunction-sections -fdata-sections)
+    add_link_options(-Wl,--gc-sections)
+    add_link_options($<$<CONFIG:Release>:-s>)
+endif()
+
 option(TASKTREE_BUILD_TESTS "Build unit tests" ON)
 
 # ---- System deps ------------------------------------------------------------
