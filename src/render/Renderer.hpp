@@ -85,7 +85,7 @@ public:
 
 private:
     void drawNode(const Rect& r, const std::string& text, const Config& cfg,
-                  bool highlight, float alphaMul) const;
+                  bool highlight, float alphaMul, TaskId id) const;
     void drawEdge(const Rect& parent, const Rect& child, const Config& cfg) const;
 
     NVGcontext* vg_ = nullptr;

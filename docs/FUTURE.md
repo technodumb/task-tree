@@ -20,8 +20,16 @@ how these get pulled into the next version's plan.
   model) that hides descendants; layout skips collapsed subtrees. Chevron affordance.
 - **Multi-select + bulk reparent**, **undo/redo** (command stack over `Forest` ops),
   **delete key** to remove the hovered subtree (with confirm).
-- **Keyboard-only navigation.** Arrow keys to move focus through the tree, Enter to
-  add a child of the focused node — no mouse required.
+- **Keyboard navigation via node ids.** Each node already renders a small id label
+  (its stable `TaskId`, top-right). Build on it:
+  - **Select** a node by typing its id (vimium-style), or step focus with arrows —
+    **up/down climb the tree** (to parent / first child), **left/right cycle siblings**.
+  - **Reparent by id**: a command like "move N under M" (type the two ids) that calls
+    `Forest::reparent`, then relayout.
+  - **Move the selected node** with modified arrows (e.g. Shift+arrows) — promote to
+    the parent's level, demote under a sibling, or reorder among siblings.
+  - Goal: full mouse-free operation (add, select, move, complete) driven by the ids.
+- **Keyboard-only add.** Enter to add a child of the focused/selected node.
 - **Pan & zoom** the canvas for large forests; **search / filter** to highlight or
   isolate matching nodes.
 

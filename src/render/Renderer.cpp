@@ -82,7 +82,7 @@ void Renderer::drawEdge(const Rect& parent, const Rect& child, const Config& cfg
 }
 
 void Renderer::drawNode(const Rect& r, const std::string& text, const Config& cfg,
-                        bool highlight, float alphaMul) const {
+                        bool highlight, float alphaMul, TaskId id) const {
     nvgBeginPath(vg_);
     nvgRoundedRect(vg_, r.x, r.y, r.w, r.h, cfg.cornerRadius);
     nvgFillColor(vg_, col(cfg.nodeFill, alphaMul));
@@ -98,6 +98,25 @@ void Renderer::drawNode(const Rect& r, const std::string& text, const Config& cf
         nvgFillColor(vg_, col(cfg.nodeText, alphaMul));
         nvgTextBox(vg_, r.x + padX_, r.y + padY_, r.w - 2 * padX_, text.c_str(), end(text));
     }
+
+    // Small id label (top-right), drawn on top with a faint pill so it stays legible
+    // over wrapped text. Used later for keyboard selection/navigation (see docs/FUTURE.md).
+    const std::string label = std::to_string(id);
+    const float idFs = fontSize_ * 0.62f;
+    nvgFontFaceId(vg_, font_);
+    nvgFontSize(vg_, idFs);
+    nvgTextAlign(vg_, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
+    float lb[4] = {0, 0, 0, 0};
+    nvgTextBounds(vg_, 0, 0, label.c_str(), nullptr, lb);
+    const float lw = lb[2] - lb[0];
+    const float lx = r.right() - 8.f;
+    const float ly = r.y + 4.f;
+    nvgBeginPath(vg_);
+    nvgRoundedRect(vg_, lx - lw - 4.f, ly - 2.f, lw + 8.f, idFs + 4.f, 4.f);
+    nvgFillColor(vg_, col(cfg.nodeFill, alphaMul));
+    nvgFill(vg_);
+    nvgFillColor(vg_, col(cfg.nodeBorder, alphaMul * 0.9f));
+    nvgText(vg_, lx, ly, label.c_str(), nullptr);
 }
 
 void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>& rects,
@@ -137,14 +156,14 @@ void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>&
         if (dv.active && id == dv.dragged) continue;
         if (const Rect* r = rectOf(id)) {
             const bool hi = dv.active && dv.validTarget && id == dv.target;
-            drawNode(*r, t.text, cfg, hi, 1.f);
+            drawNode(*r, t.text, cfg, hi, 1.f, id);
         }
     }
 
     // Ghost of the dragged node, following the cursor.
     if (dv.active) {
         const Task* t = f.get(dv.dragged);
-        drawNode(dv.ghost, t ? t->text : std::string{}, cfg, false, 0.85f);
+        drawNode(dv.ghost, t ? t->text : std::string{}, cfg, false, 0.85f, dv.dragged);
     }
     nvgRestore(vg_);
 }

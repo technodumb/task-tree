@@ -152,10 +152,22 @@ void App::onCursorPos(double x, double y) {
     if (drag_.active()) drag_.update(worldMouse(), forest_, rects_, params_);
 }
 
-void App::onScroll(double /*dx*/, double dy) {
-    if (mode_ != Mode::Full || !donePanel_.visible || !pointInPanel(mouse_)) return;
-    scrollY_ -= static_cast<float>(dy) * 48.f;
-    scrollY_ = std::max(0.f, std::min(scrollY_, doneMaxScroll_));
+void App::onScroll(double dx, double dy) {
+    if (mode_ != Mode::Full) return;
+    // Over the DONE panel: scroll its list.
+    if (donePanel_.visible && pointInPanel(mouse_)) {
+        scrollY_ -= static_cast<float>(dy) * 48.f;
+        scrollY_ = std::max(0.f, std::min(scrollY_, doneMaxScroll_));
+        return;
+    }
+    // Over the canvas: pan. Vertical wheel pans vertically; Shift+wheel (or a
+    // horizontal wheel) pans horizontally.
+    const bool shift = glfwGetKey(platform_.window(), GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
+                       glfwGetKey(platform_.window(), GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
+    const float step = 48.f;
+    pan_.x += static_cast<float>(dx) * step;
+    if (shift) pan_.x += static_cast<float>(dy) * step;
+    else       pan_.y += static_cast<float>(dy) * step;
 }
 
 // ---- task creation + classification ----------------------------------------
