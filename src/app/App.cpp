@@ -27,6 +27,7 @@ std::string trim(const std::string& s) {
 }
 
 constexpr int kAppendIndex = 1 << 30; // clamped to end by Forest::reparent
+constexpr double kFlashDuration = 1.6; // seconds the new-task path stays highlighted
 
 } // namespace
 
@@ -199,8 +200,21 @@ void App::commitInput() {
 
     input_.clear();
     forceRelayout();
+    flashPath(id);   // briefly show where the new node landed (standalone -> just itself)
     save();
     if (mode_ == Mode::QuickAdd) hide();
+}
+
+void App::flashPath(TaskId leaf) {
+    highlightSet_.clear();
+    TaskId cur = leaf;
+    for (std::size_t i = 0; cur != kNoParent && i <= forest_.size(); ++i) {
+        const Task* t = forest_.get(cur);
+        if (!t) break;
+        highlightSet_.insert(cur);
+        cur = t->parent;
+    }
+    highlightUntil_ = glfwGetTime() + kFlashDuration;
 }
 
 void App::pushClassification(TaskId newTask, ClassifyResult result) {
@@ -218,16 +232,17 @@ void App::applyPendingClassifications() {
         local.swap(pending_);
     }
     bool changed = false;
+    TaskId flashLeaf = 0;
     for (const auto& [id, r] : local) {
         if (!forest_.exists(id) || r.relation == Relation::Standalone ||
             r.targetId == 0 || !forest_.exists(r.targetId))
             continue;
-        if (r.relation == Relation::ChildOf)
-            changed |= forest_.reparent(id, r.targetId, kAppendIndex);
-        else // ParentOf: the existing task becomes a child of the new one
-            changed |= forest_.reparent(r.targetId, id, kAppendIndex);
+        const bool c = (r.relation == Relation::ChildOf)
+                           ? forest_.reparent(id, r.targetId, kAppendIndex)
+                           : forest_.reparent(r.targetId, id, kAppendIndex); // ParentOf
+        if (c) { changed = true; flashLeaf = id; }
     }
-    if (changed) { forceRelayout(); save(); }
+    if (changed) { forceRelayout(); save(); flashPath(flashLeaf); }
 }
 
 // ---- layout + render -------------------------------------------------------
@@ -272,7 +287,13 @@ void App::drawScene(int winW, int winH, float dpr) {
         renderer_.drawScrim(static_cast<float>(winW), static_cast<float>(winH), cfg_);
         DragVisual dv = buildDragVisual();
         const auto& drawRects = dv.active ? previewRects_ : rects_;
-        renderer_.drawTree(forest_, drawRects, cfg_, dv, pan_);
+        const double now = glfwGetTime();
+        float hi = 0.f;
+        if (!highlightSet_.empty()) {
+            if (now < highlightUntil_) hi = static_cast<float>((highlightUntil_ - now) / kFlashDuration);
+            else highlightSet_.clear();
+        }
+        renderer_.drawTree(forest_, drawRects, cfg_, dv, pan_, highlightSet_, hi);
         if (donePanel_.visible)
             renderer_.drawDonePanel(donePanel_, forest_, doneRows_, cfg_);
         renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(), cfg_, false);
@@ -396,6 +417,7 @@ bool App::caretOn() const {
 
 double App::desiredTimeout() const {
     if (drag_.active()) return 0.0;        // poll for smooth drag
+    if (!highlightSet_.empty() && glfwGetTime() < highlightUntil_) return 0.03; // animate flash
     if (mode_ != Mode::Hidden) return 0.5; // caret blink while visible
     return -1.0;                           // block until an event/hotkey
 }

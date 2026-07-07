@@ -13,6 +13,7 @@ option(TASKTREE_BUILD_TESTS "Build unit tests" ON)
 
 # ---- System deps ------------------------------------------------------------
 find_package(Threads REQUIRED)
+find_package(OpenSSL) # enables HTTPS in cpp-httplib for cloud LLMs (Cerebras/OpenAI)
 find_package(X11)   # provides X11::X11 for the global-hotkey XGrabKey code
 if(NOT X11_FOUND)
     message(FATAL_ERROR
@@ -48,7 +49,8 @@ add_executable(tasktree
     src/render/nanovg_gl_impl.cpp
     src/ui/TextInput.cpp
     src/ui/DragController.cpp
-    src/llm/OllamaClassifier.cpp)
+    src/llm/OllamaClassifier.cpp
+    src/llm/OpenAiClassifier.cpp)
 target_include_directories(tasktree PRIVATE src)
 target_compile_definitions(tasktree PRIVATE
     GLFW_INCLUDE_NONE           # let glad own the GL headers
@@ -60,6 +62,15 @@ target_link_libraries(tasktree PRIVATE
     httplib::httplib
     X11::X11
     Threads::Threads)
+
+if(OpenSSL_FOUND)
+    target_compile_definitions(tasktree PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT TASKTREE_HAVE_SSL)
+    target_link_libraries(tasktree PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    message(STATUS "TaskTree: HTTPS enabled (OpenSSL) — cloud LLMs (Cerebras/OpenAI) supported.")
+else()
+    message(WARNING "TaskTree: OpenSSL not found — HTTPS disabled, so cloud LLMs (Cerebras) "
+                    "won't work. Install libssl-dev and reconfigure. Local Ollama (http) is unaffected.")
+endif()
 
 # ---- Tests (dependency-free runners registered with CTest) ------------------
 if(TASKTREE_BUILD_TESTS)

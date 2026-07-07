@@ -128,7 +128,8 @@ void Renderer::drawNode(const Rect& r, const std::string& text, const Config& cf
 }
 
 void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>& rects,
-                        const Config& cfg, const DragVisual& dv, Vec2 pan) {
+                        const Config& cfg, const DragVisual& dv, Vec2 pan,
+                        const std::unordered_set<TaskId>& pathHi, float pathStrength) {
     nvgSave(vg_);
     nvgTranslate(vg_, pan.x, pan.y);
     auto rectOf = [&](TaskId id) -> const Rect* {
@@ -173,6 +174,38 @@ void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>&
         const Task* t = f.get(dv.dragged);
         drawNode(dv.ghost, t ? t->text : std::string{}, cfg, false, 0.85f, dv.dragged,
                  t ? t->status : 0);
+    }
+
+    // Fading path flash (root -> new node): highlight the path edges and node outlines.
+    if (pathStrength > 0.f && !pathHi.empty()) {
+        const NVGcolor hc = col(cfg.dropHint, pathStrength);
+        for (const auto& [id, t] : f.nodes) {
+            if (!pathHi.count(id)) continue;
+            const Rect* pr = rectOf(id);
+            if (!pr) continue;
+            for (TaskId c : t.children) {
+                if (!pathHi.count(c)) continue;
+                const Rect* cr = rectOf(c);
+                if (!cr) continue;
+                const float x0 = pr->cx(), y0 = pr->bottom(), x1 = cr->cx(), y1 = cr->top();
+                nvgBeginPath(vg_);
+                nvgMoveTo(vg_, x0, y0);
+                if (std::fabs(x0 - x1) < 1.f) nvgLineTo(vg_, x1, y1);
+                else { const float k = (y1 - y0) * 0.4f; nvgBezierTo(vg_, x0, y0 + k, x1, y1 - k, x1, y1); }
+                nvgStrokeColor(vg_, hc);
+                nvgStrokeWidth(vg_, 3.5f);
+                nvgStroke(vg_);
+            }
+        }
+        for (TaskId id : pathHi) {
+            const Rect* r = rectOf(id);
+            if (!r) continue;
+            nvgBeginPath(vg_);
+            nvgRoundedRect(vg_, r->x - 2.f, r->y - 2.f, r->w + 4.f, r->h + 4.f, cfg.cornerRadius + 2.f);
+            nvgStrokeColor(vg_, hc);
+            nvgStrokeWidth(vg_, 3.f);
+            nvgStroke(vg_);
+        }
     }
     nvgRestore(vg_);
 }

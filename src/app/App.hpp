@@ -54,6 +54,7 @@ private:
     void relayoutIfNeeded();
     void forceRelayout() { needsRelayout_ = true; }
     void commitInput();
+    void flashPath(TaskId leaf);   // briefly highlight root -> leaf after an add/classify
     void save();
     TaskId hitTest(Vec2 p) const;
     bool caretOn() const;
@@ -85,6 +86,10 @@ private:
     std::unordered_map<TaskId, Rect> previewRects_; // layout during a drag
     Vec2 mouse_;
     bool needsRelayout_ = true;
+
+    // Transient "path to the new task" flash (root -> leaf), fades over ~1.6 s.
+    std::unordered_set<TaskId> highlightSet_;
+    double highlightUntil_ = 0.0;
 
     // Canvas panning (view offset applied to the tree; screen-space UI is unaffected).
     Vec2 pan_;

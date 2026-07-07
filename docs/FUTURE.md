@@ -45,14 +45,28 @@ how these get pulled into the next version's plan.
 - **Done state / progress.** The `done` flag exists in the model — render a checkbox,
   strike-through, and roll up completion counts to parents.
 
-## Classifier (local LLM)
-- **Richer relationships.** Today the classifier returns one of standalone/child/
-  parent. Extend to suggest multiple candidate parents with a confidence UI the user
-  confirms, rather than auto-reparenting.
-- **Embedded llama.cpp** option (link `libllama`) as an alternative to the HTTP
-  `OllamaClassifier`, for a fully self-contained binary with no server dependency.
-- **Debounced re-classification** as the tree grows; **local embeddings** to find the
-  nearest existing task cheaply before asking the LLM.
+## Classifier (LLM)
+- **Generic provider system + connection modal (planned).** Today: `NullClassifier`
+  (off), `OllamaClassifier` (local HTTP), and `OpenAiClassifier` (any OpenAI-compatible
+  endpoint — Cerebras is wired via the `CEREBRAS_API_KEY` env var). Generalise this to
+  support *any* backend behind a single seam and make it fully user-configurable:
+  - An in-app **modal** (no config-file editing) to add/edit connections: pick a
+    provider *type* (local / OpenAI-compatible cloud / Ollama / Anthropic / custom
+    base-URL / future embedded llama.cpp), enter **base URL + API key** (keys stored
+    outside `tasks.json`, e.g. an env var or an OS keyring, never in plaintext config).
+  - **Fetch available models** from the endpoint (`GET /v1/models` for OpenAI-compatible,
+    `/api/tags` for Ollama) and let the user pick from a dropdown.
+  - Expose **configuration options** (model, temperature, timeout, confidence threshold,
+    max existing-task context) in the modal.
+  - Store multiple named connections; switch the active one; test-connection button.
+  - HTTPS requires `libssl-dev` at build time (CMake enables `CPPHTTPLIB_OPENSSL_SUPPORT`);
+    document/bundle this. Consider migrating the HTTP layer to something that always has
+    TLS to avoid the optional-OpenSSL split.
+- **Richer relationships.** Suggest multiple candidate parents with a confirmation UI
+  instead of auto-reparenting; show the classifier's confidence.
+- **Embedded llama.cpp** option (link `libllama`) for a fully self-contained binary.
+- **Debounced re-classification** as the tree grows; **local embeddings** to prefilter
+  the nearest existing task cheaply before calling the LLM.
 
 ## Platform & portability
 - **Wayland support** (the big one). Add a `PlatformWayland` behind `IPlatform`:

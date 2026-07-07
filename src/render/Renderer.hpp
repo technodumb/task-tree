@@ -5,6 +5,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "app/Config.hpp"
@@ -63,9 +64,11 @@ public:
 
     // Draw all edges then all nodes, translated by the canvas `pan` offset. The
     // dragged node (dv.dragged) is skipped here and drawn as a ghost; the drop target
-    // is highlighted.
+    // is highlighted. `pathHi` nodes (and edges between them) get a fading highlight
+    // at intensity `pathStrength` (0 = none) — used to flash the path to a new task.
     void drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>& rects,
-                  const Config& cfg, const DragVisual& dv, Vec2 pan);
+                  const Config& cfg, const DragVisual& dv, Vec2 pan,
+                  const std::unordered_set<TaskId>& pathHi, float pathStrength);
 
     // The input widget. In quick-add mode it's a centred box with a drop shadow;
     // otherwise a bar at the bottom of the overlay.

@@ -1,6 +1,7 @@
 // TaskTree entry point: initialise platform + GL + NanoVG, load config/tasks, wire
 // input callbacks, and run the on-demand event loop.
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -19,6 +20,7 @@
 #include "app/Paths.hpp"
 #include "llm/NullClassifier.hpp"
 #include "llm/OllamaClassifier.hpp"
+#include "llm/OpenAiClassifier.hpp"
 #include "model/Store.hpp"
 #include "platform/PlatformX11.hpp"
 #include "render/Renderer.hpp"
@@ -93,12 +95,28 @@ int main() {
     const std::string tasksPath = paths::tasksFile().string();
     store::load(forest, tasksPath); // ok if absent -> empty forest
 
+    // Classifier selection: CEREBRAS_API_KEY env -> Cerebras (cloud, OpenAI-compatible);
+    // else config's Ollama if enabled; else no-op (every task standalone).
     std::unique_ptr<IClassifier> classifier;
-    if (cfg.llmEnabled)
+    const char* cerebrasKey = std::getenv("CEREBRAS_API_KEY");
+    if (cerebrasKey && *cerebrasKey) {
+        std::string model = (cfg.llmModel.empty() || cfg.llmModel == "llama3.2")
+                                ? std::string("llama3.1-8b") : cfg.llmModel;
+        classifier = std::make_unique<OpenAiClassifier>("https://api.cerebras.ai/v1",
+                                                        cerebrasKey, model,
+                                                        cfg.llmConfidenceThreshold, cfg.llmTimeoutMs);
+        std::fprintf(stderr, "LLM: Cerebras (model %s)\n", model.c_str());
+#ifndef TASKTREE_HAVE_SSL
+        std::fprintf(stderr, "WARNING: built without HTTPS support (OpenSSL). Cerebras will not "
+                             "connect — install libssl-dev and reconfigure/rebuild.\n");
+#endif
+    } else if (cfg.llmEnabled) {
         classifier = std::make_unique<OllamaClassifier>(cfg.llmEndpoint, cfg.llmModel,
                                                         cfg.llmConfidenceThreshold, cfg.llmTimeoutMs);
-    else
+        std::fprintf(stderr, "LLM: Ollama (%s @ %s)\n", cfg.llmModel.c_str(), cfg.llmEndpoint.c_str());
+    } else {
         classifier = std::make_unique<NullClassifier>();
+    }
 
     App app(platform, renderer, *classifier, cfg, forest, tasksPath);
 
