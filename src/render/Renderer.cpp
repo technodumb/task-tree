@@ -47,7 +47,8 @@ void Renderer::measureSizes(const Forest& f, const Config& cfg,
         }
         Size sz;
         sz.w = contentW + 2 * padX_;
-        sz.h = std::max(fontSize_ + 2 * padY_, textH + 2 * padY_);
+        // Top band for the id badge + the text height + bottom padding.
+        sz.h = idBandHeight() + std::max(fontSize_, textH) + padY_;
         out[id] = sz;
     }
 }
@@ -91,32 +92,33 @@ void Renderer::drawNode(const Rect& r, const std::string& text, const Config& cf
     nvgStrokeWidth(vg_, cfg.borderWidth * (highlight ? 2.2f : 1.f));
     nvgStroke(vg_);
 
+    // Task text sits below the reserved id band.
     if (!text.empty()) {
         nvgFontFaceId(vg_, font_);
         nvgFontSize(vg_, fontSize_);
         nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
         nvgFillColor(vg_, col(cfg.nodeText, alphaMul));
-        nvgTextBox(vg_, r.x + padX_, r.y + padY_, r.w - 2 * padX_, text.c_str(), end(text));
+        nvgTextBox(vg_, r.x + padX_, r.y + idBandHeight(), r.w - 2 * padX_, text.c_str(), end(text));
     }
 
-    // Small id label (top-right), drawn on top with a faint pill so it stays legible
-    // over wrapped text. Used later for keyboard selection/navigation (see docs/FUTURE.md).
+    // Id badge (top-left), a small pill in its own colour. Handle for future keyboard
+    // selection/navigation (see docs/FUTURE.md).
     const std::string label = std::to_string(id);
     const float idFs = fontSize_ * 0.62f;
     nvgFontFaceId(vg_, font_);
     nvgFontSize(vg_, idFs);
-    nvgTextAlign(vg_, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
+    nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
     float lb[4] = {0, 0, 0, 0};
     nvgTextBounds(vg_, 0, 0, label.c_str(), nullptr, lb);
     const float lw = lb[2] - lb[0];
-    const float lx = r.right() - 8.f;
-    const float ly = r.y + 4.f;
+    const float bx = r.x + 8.f, by = r.y + 5.f;
+    const float bw = lw + 12.f, bh = idFs + 6.f;
     nvgBeginPath(vg_);
-    nvgRoundedRect(vg_, lx - lw - 4.f, ly - 2.f, lw + 8.f, idFs + 4.f, 4.f);
-    nvgFillColor(vg_, col(cfg.nodeFill, alphaMul));
+    nvgRoundedRect(vg_, bx, by, bw, bh, 5.f);
+    nvgFillColor(vg_, col(cfg.idBadgeBg, alphaMul));
     nvgFill(vg_);
-    nvgFillColor(vg_, col(cfg.nodeBorder, alphaMul * 0.9f));
-    nvgText(vg_, lx, ly, label.c_str(), nullptr);
+    nvgFillColor(vg_, col(cfg.idBadgeText, alphaMul));
+    nvgText(vg_, bx + 6.f, by + 3.f, label.c_str(), nullptr);
 }
 
 void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>& rects,

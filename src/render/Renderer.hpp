@@ -88,6 +88,9 @@ private:
                   bool highlight, float alphaMul, TaskId id) const;
     void drawEdge(const Rect& parent, const Rect& child, const Config& cfg) const;
 
+    // Reserved top band inside a node for the id badge (so text never overlaps it).
+    float idBandHeight() const { return fontSize_ * 0.62f + 12.f; }
+
     NVGcontext* vg_ = nullptr;
     int   font_ = -1;
     float fontSize_ = 18.f;

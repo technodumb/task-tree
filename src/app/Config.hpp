@@ -26,6 +26,8 @@ struct Config {
     Color nodeFill    {0.13f, 0.15f, 0.19f, 0.96f};
     Color nodeBorder  {0.45f, 0.55f, 0.72f, 1.f};
     Color nodeText    {0.92f, 0.94f, 0.98f, 1.f};
+    Color idBadgeBg   {0.24f, 0.30f, 0.46f, 1.f};   // node id label background
+    Color idBadgeText {0.86f, 0.90f, 1.00f, 1.f};
     Color edgeColor   {0.50f, 0.58f, 0.70f, 0.85f};
     Color dropHint    {0.40f, 0.80f, 0.55f, 0.95f}; // preview edge / gap cue
     Color quickAddFill{0.14f, 0.16f, 0.20f, 0.98f};

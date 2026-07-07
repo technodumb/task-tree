@@ -47,6 +47,8 @@ Config loadConfig(const std::string& path) {
     c.nodeFill     = col("theme.node_fill", c.nodeFill);
     c.nodeBorder   = col("theme.node_border", c.nodeBorder);
     c.nodeText     = col("theme.node_text", c.nodeText);
+    c.idBadgeBg    = col("theme.id_badge_bg", c.idBadgeBg);
+    c.idBadgeText  = col("theme.id_badge_text", c.idBadgeText);
     c.edgeColor    = col("theme.edge", c.edgeColor);
     c.dropHint     = col("theme.drop_hint", c.dropHint);
     c.quickAddFill = col("theme.quick_add_fill", c.quickAddFill);
@@ -85,6 +87,8 @@ bool saveConfig(const Config& c, const std::string& path) {
       << "node_fill       = \"" << colorToHex(c.nodeFill) << "\"\n"
       << "node_border     = \"" << colorToHex(c.nodeBorder) << "\"\n"
       << "node_text       = \"" << colorToHex(c.nodeText) << "\"\n"
+      << "id_badge_bg     = \"" << colorToHex(c.idBadgeBg) << "\"\n"
+      << "id_badge_text   = \"" << colorToHex(c.idBadgeText) << "\"\n"
       << "edge            = \"" << colorToHex(c.edgeColor) << "\"\n"
       << "drop_hint       = \"" << colorToHex(c.dropHint) << "\"\n"
       << "quick_add_fill  = \"" << colorToHex(c.quickAddFill) << "\"\n"
