@@ -83,10 +83,16 @@ void Renderer::drawEdge(const Rect& parent, const Rect& child, const Config& cfg
 }
 
 void Renderer::drawNode(const Rect& r, const std::string& text, const Config& cfg,
-                        bool highlight, float alphaMul, TaskId id) const {
+                        bool highlight, float alphaMul, TaskId id, int status) const {
+    // Fill + text colour depend on the status (right-click cycles it).
+    const Color fillC = (status == 1) ? cfg.nodeFillInProgress
+                      : (status == 2) ? cfg.nodeFillPriority
+                                      : cfg.nodeFill;
+    const Color textC = (status == 0) ? cfg.nodeText : cfg.nodeTextDark;
+
     nvgBeginPath(vg_);
     nvgRoundedRect(vg_, r.x, r.y, r.w, r.h, cfg.cornerRadius);
-    nvgFillColor(vg_, col(cfg.nodeFill, alphaMul));
+    nvgFillColor(vg_, col(fillC, alphaMul));
     nvgFill(vg_);
     nvgStrokeColor(vg_, col(highlight ? cfg.dropHint : cfg.nodeBorder, alphaMul));
     nvgStrokeWidth(vg_, cfg.borderWidth * (highlight ? 2.2f : 1.f));
@@ -97,7 +103,7 @@ void Renderer::drawNode(const Rect& r, const std::string& text, const Config& cf
         nvgFontFaceId(vg_, font_);
         nvgFontSize(vg_, fontSize_);
         nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
-        nvgFillColor(vg_, col(cfg.nodeText, alphaMul));
+        nvgFillColor(vg_, col(textC, alphaMul));
         nvgTextBox(vg_, r.x + padX_, r.y + idBandHeight(), r.w - 2 * padX_, text.c_str(), end(text));
     }
 
@@ -158,14 +164,15 @@ void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>&
         if (dv.active && id == dv.dragged) continue;
         if (const Rect* r = rectOf(id)) {
             const bool hi = dv.active && dv.validTarget && id == dv.target;
-            drawNode(*r, t.text, cfg, hi, 1.f, id);
+            drawNode(*r, t.text, cfg, hi, 1.f, id, t.status);
         }
     }
 
     // Ghost of the dragged node, following the cursor.
     if (dv.active) {
         const Task* t = f.get(dv.dragged);
-        drawNode(dv.ghost, t ? t->text : std::string{}, cfg, false, 0.85f, dv.dragged);
+        drawNode(dv.ghost, t ? t->text : std::string{}, cfg, false, 0.85f, dv.dragged,
+                 t ? t->status : 0);
     }
     nvgRestore(vg_);
 }

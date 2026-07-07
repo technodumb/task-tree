@@ -90,6 +90,16 @@ void App::onKey(int key, int action, int mods) {
 void App::onMouseButton(int button, int action, int mods) {
     if (mode_ != Mode::Full) return;
 
+    // Right-click a canvas node to cycle its status colour: default -> yellow
+    // (in progress) -> orange (priority) -> default.
+    if (button == GLFW_MOUSE_BUTTON_RIGHT) {
+        if (action == GLFW_PRESS && !pointInPanel(mouse_)) {
+            const TaskId id = hitTest(worldMouse());
+            if (Task* t = forest_.get(id)) { t->status = (t->status + 1) % 3; save(); }
+        }
+        return;
+    }
+
     // Pan the canvas: middle-drag, or Alt + left-drag.
     if (button == GLFW_MOUSE_BUTTON_MIDDLE) {
         if (action == GLFW_PRESS) { panning_ = true; panGrab_ = mouse_; panOrigin_ = pan_; }

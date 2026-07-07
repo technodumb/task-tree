@@ -34,6 +34,7 @@ bool load(Forest& f, const std::string& path) {
         t.parent = jt.value("parent", kNoParent);
         t.text = jt.value("text", std::string{});
         t.done = jt.value("done", false);
+        t.status = jt.value("status", 0);
         t.createdAt = jt.value("createdAt", std::int64_t{0});
         for (const auto& c : jt.value("children", json::array()))
             t.children.push_back(c.get<TaskId>());
@@ -73,6 +74,7 @@ bool save(const Forest& f, const std::string& path) {
             {"parent", t.parent},
             {"text", t.text},
             {"done", t.done},
+            {"status", t.status},
             {"createdAt", t.createdAt},
             {"children", t.children},
         });

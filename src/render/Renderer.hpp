@@ -85,7 +85,7 @@ public:
 
 private:
     void drawNode(const Rect& r, const std::string& text, const Config& cfg,
-                  bool highlight, float alphaMul, TaskId id) const;
+                  bool highlight, float alphaMul, TaskId id, int status) const;
     void drawEdge(const Rect& parent, const Rect& child, const Config& cfg) const;
 
     // Reserved top band inside a node for the id badge (so text never overlaps it).

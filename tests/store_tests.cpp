@@ -30,6 +30,7 @@ int main() {
     {
         Forest f;
         TaskId a = f.addTask("alpha — éà");   // UTF-8 content
+        f.get(a)->status = 2;                 // priority
         TaskId b = f.addTask("beta", a);
         f.addTask("gamma", a);
         TaskId c = f.addTask("second tree");
@@ -45,6 +46,7 @@ int main() {
         CHECK(g.nextId == f.nextId, "nextId preserved");
         CHECK(g.roots == f.roots, "roots order preserved");
         CHECK(g.get(a) && g.get(a)->text == "alpha — éà", "UTF-8 text preserved");
+        CHECK(g.get(a) && g.get(a)->status == 2, "status preserved");
         CHECK(g.get(a)->children == f.get(a)->children, "children order preserved");
         CHECK(g.get(b) && g.get(b)->parent == a, "parent link preserved");
         fs::remove(path);

@@ -26,6 +26,9 @@ struct Config {
     Color nodeFill    {0.13f, 0.15f, 0.19f, 0.96f};
     Color nodeBorder  {0.45f, 0.55f, 0.72f, 1.f};
     Color nodeText    {0.92f, 0.94f, 0.98f, 1.f};
+    Color nodeTextDark{0.14f, 0.11f, 0.04f, 1.f};   // text on the bright status fills
+    Color nodeFillInProgress{0.85f, 0.72f, 0.20f, 0.97f}; // right-click 1: yellow
+    Color nodeFillPriority  {0.90f, 0.52f, 0.16f, 0.97f}; // right-click 2: orange
     Color idBadgeBg   {0.24f, 0.30f, 0.46f, 1.f};   // node id label background
     Color idBadgeText {0.86f, 0.90f, 1.00f, 1.f};
     Color edgeColor   {0.50f, 0.58f, 0.70f, 0.85f};

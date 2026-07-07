@@ -20,6 +20,7 @@ struct Task {
     std::string text;               // UTF-8
     std::vector<TaskId> children;   // ordered; sibling order IS the layout order
     bool done = false;
+    int  status = 0;                // 0 = default, 1 = in progress (yellow), 2 = priority (orange)
     std::int64_t createdAt = 0;     // epoch milliseconds
 };
 

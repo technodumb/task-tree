@@ -47,6 +47,9 @@ Config loadConfig(const std::string& path) {
     c.nodeFill     = col("theme.node_fill", c.nodeFill);
     c.nodeBorder   = col("theme.node_border", c.nodeBorder);
     c.nodeText     = col("theme.node_text", c.nodeText);
+    c.nodeTextDark = col("theme.node_text_dark", c.nodeTextDark);
+    c.nodeFillInProgress = col("theme.node_fill_in_progress", c.nodeFillInProgress);
+    c.nodeFillPriority   = col("theme.node_fill_priority", c.nodeFillPriority);
     c.idBadgeBg    = col("theme.id_badge_bg", c.idBadgeBg);
     c.idBadgeText  = col("theme.id_badge_text", c.idBadgeText);
     c.edgeColor    = col("theme.edge", c.edgeColor);
@@ -87,6 +90,10 @@ bool saveConfig(const Config& c, const std::string& path) {
       << "node_fill       = \"" << colorToHex(c.nodeFill) << "\"\n"
       << "node_border     = \"" << colorToHex(c.nodeBorder) << "\"\n"
       << "node_text       = \"" << colorToHex(c.nodeText) << "\"\n"
+      << "# Right-click a node to cycle: default -> in-progress -> priority\n"
+      << "node_text_dark        = \"" << colorToHex(c.nodeTextDark) << "\"\n"
+      << "node_fill_in_progress = \"" << colorToHex(c.nodeFillInProgress) << "\"\n"
+      << "node_fill_priority    = \"" << colorToHex(c.nodeFillPriority) << "\"\n"
       << "id_badge_bg     = \"" << colorToHex(c.idBadgeBg) << "\"\n"
       << "id_badge_text   = \"" << colorToHex(c.idBadgeText) << "\"\n"
       << "edge            = \"" << colorToHex(c.edgeColor) << "\"\n"
