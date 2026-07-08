@@ -1,5 +1,6 @@
 #include "llm/OpenAiClassifier.hpp"
 
+#include <chrono>
 #include <thread>
 
 #include <httplib.h>
@@ -94,9 +95,22 @@ ClassifyResult run(const std::string& endpoint, const std::string& apiKey,
         // (TLS server-cert verification is on by default when built with OpenSSL.)
 
         httplib::Headers headers = {{"Authorization", "Bearer " + apiKey}};
-        auto res = cli.Post((prefix + "/chat/completions").c_str(), headers,
-                            body.dump(), "application/json");
-        if (!res) return bail("no response (network/TLS error — is HTTPS/libssl built in?)");
+        const std::string body_str = body.dump();
+        const std::string route = prefix + "/chat/completions";
+
+        // Retry transient transport failures (dropped connection, TLS blip, timeout,
+        // flaky IPv6 — Cerebras is IPv6/Cloudflare). Do NOT retry real HTTP responses
+        // (a 4xx won't fix itself); those are handled below.
+        httplib::Result res;
+        std::string lastErr;
+        for (int attempt = 1; attempt <= 3; ++attempt) {
+            res = cli.Post(route.c_str(), headers, body_str, "application/json");
+            if (res) break; // got an HTTP response (any status)
+            lastErr = httplib::to_string(res.error());
+            add("attempt " + std::to_string(attempt) + " transport error: " + lastErr + "\n");
+            std::this_thread::sleep_for(std::chrono::milliseconds(150 * attempt));
+        }
+        if (!res) return bail("transport failure: " + lastErr + " (after 3 attempts)");
         add("http: " + std::to_string(res->status) + "\nraw: " + res->body + "\n");
         if (res->status != 200) return bail("http status " + std::to_string(res->status));
 
