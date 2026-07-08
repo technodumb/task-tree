@@ -42,6 +42,17 @@ bool Forest::isDescendantOf(TaskId node, TaskId ancestor) const {
     return false;
 }
 
+bool Forest::isInDoneSection(TaskId node) const {
+    TaskId cur = node;
+    for (std::size_t steps = 0; cur != kNoParent && steps <= nodes.size(); ++steps) {
+        if (std::find(doneRoots.begin(), doneRoots.end(), cur) != doneRoots.end()) return true;
+        const Task* t = get(cur);
+        if (!t) break;
+        cur = t->parent;
+    }
+    return false;
+}
+
 void Forest::detachFromParent(TaskId child) {
     Task* c = get(child);
     if (!c) return;

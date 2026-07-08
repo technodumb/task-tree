@@ -162,6 +162,10 @@ int main() {
         CHECK(std::find(f.roots.begin(), f.roots.end(), a) == f.roots.end(), "a left roots");
         CHECK(std::find(f.doneRoots.begin(), f.doneRoots.end(), a) != f.doneRoots.end(), "a in doneRoots");
         CHECK(f.get(b)->parent == a, "subtree stays intact under a done root");
+        CHECK(f.isInDoneSection(a), "done root is in the DONE section");
+        CHECK(f.isInDoneSection(b), "descendant of a done root is in the DONE section");
+        TaskId canvasRoot = f.addTask("still on canvas");
+        CHECK(!f.isInDoneSection(canvasRoot), "a canvas task is not in the DONE section");
         CHECK(!f.markDone(a), "markDone twice is a no-op");
         CHECK(f.restoreFromDone(a), "restoreFromDone brings a back");
         CHECK(!f.get(a)->done, "a not done after restore");

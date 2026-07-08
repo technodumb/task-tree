@@ -45,6 +45,9 @@ public:
     // Returns true when node == ancestor as well.
     bool isDescendantOf(TaskId node, TaskId ancestor) const;
 
+    // Is `node` in the DONE section (it is, or descends from, a done root)?
+    bool isInDoneSection(TaskId node) const;
+
     // Move `child` under `newParent` (kNoParent → make it a root) at position `index`
     // among the destination's children (clamped). Rejects moves that would create a
     // cycle (dropping a node onto itself or one of its own descendants). Returns

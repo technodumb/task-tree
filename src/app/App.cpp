@@ -227,7 +227,8 @@ void App::commitInput() {
         std::vector<std::pair<TaskId, std::string>> existing;
         existing.reserve(forest_.nodes.size());
         for (const auto& [eid, t] : forest_.nodes)
-            if (eid != id) existing.emplace_back(eid, t.text);
+            if (eid != id && !forest_.isInDoneSection(eid)) // never classify against DONE tasks
+                existing.emplace_back(eid, t.text);
         classifier_.classify(txt, std::move(existing),
                               [this, id](ClassifyResult r) { pushClassification(id, r); });
     }
@@ -281,6 +282,11 @@ void App::applyPendingClassifications() {
         if (!forest_.exists(r.targetId)) {
             if (L) llmlog::write("APPLY rejected: target id " + std::to_string(r.targetId) +
                                  " does not exist (kept '" + textOf(id) + "' standalone)");
+            continue;
+        }
+        if (forest_.isInDoneSection(r.targetId)) { // never attach to / resurrect DONE tasks
+            if (L) llmlog::write("APPLY rejected: target id " + std::to_string(r.targetId) +
+                                 " is in the DONE section (kept '" + textOf(id) + "' standalone)");
             continue;
         }
         const bool childOf = (r.relation == Relation::ChildOf);
