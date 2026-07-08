@@ -9,6 +9,7 @@
 
 #include <GLFW/glfw3.h>
 
+#include "llm/LlmLog.hpp"
 #include "model/Store.hpp"
 
 namespace tt {
@@ -173,17 +174,22 @@ void App::onScroll(double dx, double dy) {
         scrollY_ = std::max(0.f, std::min(scrollY_, doneMaxScroll_));
         return;
     }
+    // Canvas wheel behaviour is configurable (config [input] scroll_mode).
+    if (cfg_.scrollMode == "off") return;
+
     GLFWwindow* w = platform_.window();
     const bool ctrl = glfwGetKey(w, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
                       glfwGetKey(w, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
     const bool shift = glfwGetKey(w, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
                        glfwGetKey(w, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
 
-    // Ctrl+scroll: zoom about the cursor (keep the world point under it fixed).
-    if (ctrl && dy != 0.0) {
+    // "zoom": wheel zooms. "pan": wheel pans, but Ctrl+wheel still zooms.
+    const bool doZoom = (cfg_.scrollMode == "zoom") || (cfg_.scrollMode == "pan" && ctrl);
+    if (doZoom) {
+        if (dy == 0.0) return;
         const float factor = (dy > 0.0) ? 1.1f : 1.f / 1.1f;
         const float nz = std::max(0.3f, std::min(3.0f, zoom_ * factor));
-        const float wx = (mouse_.x - pan_.x) / zoom_;
+        const float wx = (mouse_.x - pan_.x) / zoom_; // keep the world point under the cursor fixed
         const float wy = (mouse_.y - pan_.y) / zoom_;
         pan_.x = mouse_.x - nz * wx;
         pan_.y = mouse_.y - nz * wy;
@@ -191,12 +197,12 @@ void App::onScroll(double dx, double dy) {
         return;
     }
 
-    // Otherwise pan: vertical wheel pans vertically; Shift+wheel (or a horizontal
-    // wheel) pans horizontally.
-    const float step = 48.f;
-    pan_.x += static_cast<float>(dx) * step;
-    if (shift) pan_.x += static_cast<float>(dy) * step;
-    else       pan_.y += static_cast<float>(dy) * step;
+    if (cfg_.scrollMode == "pan") {
+        const float step = 48.f;
+        pan_.x += static_cast<float>(dx) * step;
+        if (shift) pan_.x += static_cast<float>(dy) * step;
+        else       pan_.y += static_cast<float>(dy) * step;
+    }
 }
 
 void App::moveOverlayToNextMonitor() {
@@ -259,16 +265,37 @@ void App::applyPendingClassifications() {
         std::lock_guard<std::mutex> lock(pendingMutex_);
         local.swap(pending_);
     }
+    const bool L = llmlog::enabled();
+    auto textOf = [&](TaskId t) {
+        const Task* n = forest_.get(t);
+        return n ? n->text : std::string("<gone>");
+    };
     bool changed = false;
     TaskId flashLeaf = 0;
     for (const auto& [id, r] : local) {
-        if (!forest_.exists(id) || r.relation == Relation::Standalone ||
-            r.targetId == 0 || !forest_.exists(r.targetId))
+        if (r.relation == Relation::Standalone || r.targetId == 0) continue; // classifier logged it
+        if (!forest_.exists(id)) {
+            if (L) llmlog::write("APPLY skipped: new task " + std::to_string(id) + " no longer exists");
             continue;
-        const bool c = (r.relation == Relation::ChildOf)
-                           ? forest_.reparent(id, r.targetId, kAppendIndex)
-                           : forest_.reparent(r.targetId, id, kAppendIndex); // ParentOf
-        if (c) { changed = true; flashLeaf = id; }
+        }
+        if (!forest_.exists(r.targetId)) {
+            if (L) llmlog::write("APPLY rejected: target id " + std::to_string(r.targetId) +
+                                 " does not exist (kept '" + textOf(id) + "' standalone)");
+            continue;
+        }
+        const bool childOf = (r.relation == Relation::ChildOf);
+        const bool c = childOf ? forest_.reparent(id, r.targetId, kAppendIndex)
+                               : forest_.reparent(r.targetId, id, kAppendIndex); // ParentOf
+        if (c) {
+            changed = true;
+            flashLeaf = id;
+            if (L) llmlog::write("APPLY: '" + textOf(id) + "' (id " + std::to_string(id) + ") " +
+                                 (childOf ? "-> child of '" : "-> parent of '") + textOf(r.targetId) +
+                                 "' (id " + std::to_string(r.targetId) + ")");
+        } else if (L) {
+            llmlog::write("APPLY rejected: reparent failed (cycle / invalid) new=" +
+                          std::to_string(id) + " target=" + std::to_string(r.targetId));
+        }
     }
     if (changed) { forceRelayout(); save(); flashPath(flashLeaf); }
 }

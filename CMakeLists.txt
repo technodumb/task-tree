@@ -59,7 +59,8 @@ add_executable(tasktree
     src/ui/TextInput.cpp
     src/ui/DragController.cpp
     src/llm/OllamaClassifier.cpp
-    src/llm/OpenAiClassifier.cpp)
+    src/llm/OpenAiClassifier.cpp
+    src/llm/LlmLog.cpp)
 target_include_directories(tasktree PRIVATE src)
 target_compile_definitions(tasktree PRIVATE
     GLFW_INCLUDE_NONE           # let glad own the GL headers

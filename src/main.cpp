@@ -18,6 +18,7 @@
 #include "app/App.hpp"
 #include "app/Config.hpp"
 #include "app/Paths.hpp"
+#include "llm/LlmLog.hpp"
 #include "llm/NullClassifier.hpp"
 #include "llm/OllamaClassifier.hpp"
 #include "llm/OpenAiClassifier.hpp"
@@ -98,6 +99,7 @@ int main() {
     // Classifier selection: CEREBRAS_API_KEY env -> Cerebras (cloud, OpenAI-compatible);
     // else config's Ollama if enabled; else no-op (every task standalone).
     std::unique_ptr<IClassifier> classifier;
+    bool llmActive = false;
     const char* cerebrasKey = std::getenv("CEREBRAS_API_KEY");
     if (cerebrasKey && *cerebrasKey) {
         std::string model = (cfg.llmModel.empty() || cfg.llmModel == "llama3.2")
@@ -105,6 +107,7 @@ int main() {
         classifier = std::make_unique<OpenAiClassifier>("https://api.cerebras.ai/v1",
                                                         cerebrasKey, model,
                                                         cfg.llmConfidenceThreshold, cfg.llmTimeoutMs);
+        llmActive = true;
         std::fprintf(stderr, "LLM: Cerebras (model %s)\n", model.c_str());
 #ifndef TASKTREE_HAVE_SSL
         std::fprintf(stderr, "WARNING: built without HTTPS support (OpenSSL). Cerebras will not "
@@ -113,10 +116,16 @@ int main() {
     } else if (cfg.llmEnabled) {
         classifier = std::make_unique<OllamaClassifier>(cfg.llmEndpoint, cfg.llmModel,
                                                         cfg.llmConfidenceThreshold, cfg.llmTimeoutMs);
+        llmActive = true;
         std::fprintf(stderr, "LLM: Ollama (%s @ %s)\n", cfg.llmModel.c_str(), cfg.llmEndpoint.c_str());
     } else {
         classifier = std::make_unique<NullClassifier>();
     }
+
+    // Request/response log (for debugging task placement).
+    llmlog::configure(cfg.llmLogRequests && llmActive, (paths::dataDir() / "llm.log").string());
+    if (llmlog::enabled())
+        std::fprintf(stderr, "LLM request log: %s\n", llmlog::path().c_str());
 
     App app(platform, renderer, *classifier, cfg, forest, tasksPath);
 
@@ -148,9 +157,9 @@ int main() {
 
     std::fprintf(stderr, "TaskTree running. Toggle: %s   Quick-add: %s\n",
                  cfg.toggleHotkey.c_str(), cfg.quickAddHotkey.c_str());
-    std::fprintf(stderr, "Pan: middle-drag / drag empty canvas / scroll (Shift=horizontal). "
-                         "Zoom: Ctrl+scroll. Next monitor: Ctrl+M. "
-                         "Double-click empty space to recenter+reset zoom.\n");
+    std::fprintf(stderr, "Pan: middle-drag or drag empty canvas. Wheel: %s (config [input] "
+                         "scroll_mode). Next monitor: Ctrl+M. Double-click empty to recenter.\n",
+                 cfg.scrollMode.c_str());
 
     // On-demand event loop: blocks (~0 CPU) when idle, wakes on input/hotkey.
     while (!glfwWindowShouldClose(win)) {

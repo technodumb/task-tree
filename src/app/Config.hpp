@@ -20,6 +20,12 @@ struct Config {
     float cornerRadius = 14.f;
     float borderWidth  = 1.5f;
 
+    // input: what the mouse wheel does over the canvas.
+    //   "zoom" = wheel zooms about the cursor (no modifier needed)
+    //   "pan"  = wheel pans vertically, Shift+wheel horizontally, Ctrl+wheel zooms
+    //   "off"  = wheel does nothing on the canvas (drag to pan still works)
+    std::string scrollMode = "zoom";
+
     // theme (RGBA 0..1)
     float overlayOpacity = 0.35f;         // scrim alpha in full-overlay mode
     Color scrim       {0.04f, 0.05f, 0.07f, 1.f}; // multiplied by overlayOpacity
@@ -48,6 +54,7 @@ struct Config {
     std::string llmModel    = "llama3.2";
     float       llmConfidenceThreshold = 0.55f;
     int         llmTimeoutMs = 4000;
+    bool        llmLogRequests = true;   // log requests/responses to <data>/llm.log
 
     HotkeySpec toggleSpec()   const { return parseHotkey(toggleHotkey); }
     HotkeySpec quickAddSpec() const { return parseHotkey(quickAddHotkey); }

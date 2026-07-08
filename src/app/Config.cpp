@@ -42,6 +42,8 @@ Config loadConfig(const std::string& path) {
     c.cornerRadius = flt("layout.corner_radius", c.cornerRadius);
     c.borderWidth  = flt("layout.border_width", c.borderWidth);
 
+    c.scrollMode = str("input.scroll_mode", c.scrollMode);
+
     c.overlayOpacity = flt("theme.overlay_opacity", c.overlayOpacity);
     c.scrim        = col("theme.scrim", c.scrim);
     c.nodeFill     = col("theme.node_fill", c.nodeFill);
@@ -66,6 +68,7 @@ Config loadConfig(const std::string& path) {
     c.llmModel    = str("llm.model", c.llmModel);
     c.llmConfidenceThreshold = flt("llm.confidence_threshold", c.llmConfidenceThreshold);
     c.llmTimeoutMs = integer("llm.timeout_ms", c.llmTimeoutMs);
+    c.llmLogRequests = boolean("llm.log_requests", c.llmLogRequests);
     return c;
 }
 
@@ -84,6 +87,10 @@ bool saveConfig(const Config& c, const std::string& path) {
       << "max_node_width = " << c.maxNodeWidth << "  # px; text wraps, height grows to fit\n"
       << "corner_radius  = " << c.cornerRadius << "\n"
       << "border_width   = " << c.borderWidth << "\n\n"
+      << "[input]\n"
+      << "# Mouse wheel over the canvas: \"zoom\" | \"pan\" | \"off\". Drag to pan always works\n"
+      << "# (middle-drag or drag empty canvas), regardless of this setting.\n"
+      << "scroll_mode = \"" << c.scrollMode << "\"\n\n"
       << "[theme]\n"
       << "overlay_opacity = " << c.overlayOpacity << "  # scrim darkness (0..1)\n"
       << "scrim           = \"" << colorToHex(c.scrim) << "\"\n"
@@ -112,7 +119,9 @@ bool saveConfig(const Config& c, const std::string& path) {
       << "endpoint             = \"" << c.llmEndpoint << "\"\n"
       << "model                = \"" << c.llmModel << "\"\n"
       << "confidence_threshold = " << c.llmConfidenceThreshold << "\n"
-      << "timeout_ms           = " << c.llmTimeoutMs << "\n";
+      << "timeout_ms           = " << c.llmTimeoutMs << "\n"
+      << "# Log each classifier request/response to <data dir>/llm.log for debugging.\n"
+      << "log_requests         = " << (c.llmLogRequests ? "true" : "false") << "\n";
 
     const std::filesystem::path tmp = p.string() + ".tmp";
     {
