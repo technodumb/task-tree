@@ -23,6 +23,33 @@ bool Renderer::init(NVGcontext* vg, const std::string& fontPath) {
     return font_ >= 0;
 }
 
+const Renderer::NodeTextCache& Renderer::layoutText(TaskId id, const std::string& text,
+                                                    float contentW) const {
+    NodeTextCache& e = textCache_[id];
+    if (e.width == contentW && e.text == text) return e; // cache hit (node text never changes)
+
+    e.text = text;
+    e.width = contentW;
+    e.lines.clear();
+    nvgFontFaceId(vg_, font_);
+    nvgFontSize(vg_, fontSize_);
+    float asc = 0, desc = 0, lineh = 0;
+    nvgTextMetrics(vg_, &asc, &desc, &lineh);
+    e.lineH = lineh;
+
+    if (!text.empty()) {
+        const char* start = text.c_str();
+        const char* stop = text.c_str() + text.size();
+        NVGtextRow rows[4];
+        int n = 0;
+        while ((n = nvgTextBreakLines(vg_, start, stop, contentW, rows, 4)) > 0) {
+            for (int i = 0; i < n; ++i) e.lines.emplace_back(rows[i].start, rows[i].end);
+            start = rows[n - 1].next;
+        }
+    }
+    return e;
+}
+
 void Renderer::measureSizes(const Forest& f, const Config& cfg,
                             std::unordered_map<TaskId, Size>& out) const {
     out.clear();
@@ -39,12 +66,11 @@ void Renderer::measureSizes(const Forest& f, const Config& cfg,
         const float singleW = t.text.empty() ? minNodeW_ : nvgTextBounds(vg_, 0, 0, s, e, b);
         const float contentW = std::min(maxContentW, std::max(minNodeW_ - 2 * padX_, singleW));
 
-        float tb[4] = {0, 0, 0, 0};
-        float textH = fontSize_;
-        if (!t.text.empty()) {
-            nvgTextBoxBounds(vg_, 0, 0, contentW, s, e, tb);
-            textH = tb[3] - tb[1];
-        }
+        // Wrap once (at scale 1) and size from the cached line count, so the box always
+        // fits the exact lines that will be drawn — at any zoom level.
+        const NodeTextCache& L = layoutText(id, t.text, contentW);
+        const float textH = t.text.empty() ? fontSize_ : L.lines.size() * L.lineH;
+
         Size sz;
         sz.w = contentW + 2 * padX_;
         // Top band for the id badge + the text height + bottom padding.
@@ -98,13 +124,19 @@ void Renderer::drawNode(const Rect& r, const std::string& text, const Config& cf
     nvgStrokeWidth(vg_, cfg.borderWidth * (highlight ? 2.2f : 1.f));
     nvgStroke(vg_);
 
-    // Task text sits below the reserved id band.
+    // Task text sits below the reserved id band. Draw the pre-wrapped cached lines
+    // explicitly (no re-wrapping) so zoom never reflows or clips the text.
     if (!text.empty()) {
         nvgFontFaceId(vg_, font_);
         nvgFontSize(vg_, fontSize_);
         nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
         nvgFillColor(vg_, col(textC, alphaMul));
-        nvgTextBox(vg_, r.x + padX_, r.y + idBandHeight(), r.w - 2 * padX_, text.c_str(), end(text));
+        const NodeTextCache& L = layoutText(id, text, r.w - 2 * padX_);
+        float ty = r.y + idBandHeight();
+        for (const std::string& line : L.lines) {
+            nvgText(vg_, r.x + padX_, ty, line.c_str(), line.c_str() + line.size());
+            ty += L.lineH;
+        }
     }
 
     // Id badge (top-left), a small pill in its own colour. Handle for future keyboard

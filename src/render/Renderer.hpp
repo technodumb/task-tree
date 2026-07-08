@@ -94,12 +94,24 @@ private:
     // Reserved top band inside a node for the id badge (so text never overlaps it).
     float idBandHeight() const { return fontSize_ * 0.62f + 12.f; }
 
+    // Per-node wrapped-text cache. Node text never changes, so the line breaks are
+    // computed once (at scale 1) and reused for both sizing and drawing — this keeps
+    // wrapping identical at every zoom level (no reflow -> no clipping).
+    struct NodeTextCache {
+        std::string text;
+        float width = -1.f;
+        float lineH = 0.f;
+        std::vector<std::string> lines;
+    };
+    const NodeTextCache& layoutText(TaskId id, const std::string& text, float contentW) const;
+
     NVGcontext* vg_ = nullptr;
     int   font_ = -1;
     float fontSize_ = 18.f;
     float padX_ = 14.f;
     float padY_ = 10.f;
     float minNodeW_ = 90.f;
+    mutable std::unordered_map<TaskId, NodeTextCache> textCache_;
 };
 
 } // namespace tt
