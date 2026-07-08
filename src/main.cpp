@@ -101,7 +101,7 @@ int main() {
     const char* cerebrasKey = std::getenv("CEREBRAS_API_KEY");
     if (cerebrasKey && *cerebrasKey) {
         std::string model = (cfg.llmModel.empty() || cfg.llmModel == "llama3.2")
-                                ? std::string("llama3.1-8b") : cfg.llmModel;
+                                ? std::string("gemma-4-31b") : cfg.llmModel;
         classifier = std::make_unique<OpenAiClassifier>("https://api.cerebras.ai/v1",
                                                         cerebrasKey, model,
                                                         cfg.llmConfidenceThreshold, cfg.llmTimeoutMs);
@@ -148,8 +148,9 @@ int main() {
 
     std::fprintf(stderr, "TaskTree running. Toggle: %s   Quick-add: %s\n",
                  cfg.toggleHotkey.c_str(), cfg.quickAddHotkey.c_str());
-    std::fprintf(stderr, "Pan: middle-drag / Alt+left-drag / scroll (Shift+scroll = horizontal). "
-                         "Double-click empty space to recenter.\n");
+    std::fprintf(stderr, "Pan: middle-drag / drag empty canvas / scroll (Shift=horizontal). "
+                         "Zoom: Ctrl+scroll. Next monitor: Ctrl+M. "
+                         "Double-click empty space to recenter+reset zoom.\n");
 
     // On-demand event loop: blocks (~0 CPU) when idle, wakes on input/hotkey.
     while (!glfwWindowShouldClose(win)) {

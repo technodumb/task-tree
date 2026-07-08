@@ -67,7 +67,7 @@ public:
     // is highlighted. `pathHi` nodes (and edges between them) get a fading highlight
     // at intensity `pathStrength` (0 = none) — used to flash the path to a new task.
     void drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>& rects,
-                  const Config& cfg, const DragVisual& dv, Vec2 pan,
+                  const Config& cfg, const DragVisual& dv, Vec2 pan, float zoom,
                   const std::unordered_set<TaskId>& pathHi, float pathStrength);
 
     // The input widget. In quick-add mode it's a centred box with a drop shadow;

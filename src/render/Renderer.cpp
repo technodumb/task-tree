@@ -128,10 +128,11 @@ void Renderer::drawNode(const Rect& r, const std::string& text, const Config& cf
 }
 
 void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>& rects,
-                        const Config& cfg, const DragVisual& dv, Vec2 pan,
+                        const Config& cfg, const DragVisual& dv, Vec2 pan, float zoom,
                         const std::unordered_set<TaskId>& pathHi, float pathStrength) {
     nvgSave(vg_);
-    nvgTranslate(vg_, pan.x, pan.y);
+    nvgTranslate(vg_, pan.x, pan.y);  // screen = pan + zoom * world
+    nvgScale(vg_, zoom, zoom);
     auto rectOf = [&](TaskId id) -> const Rect* {
         auto it = rects.find(id);
         return it == rects.end() ? nullptr : &it->second;

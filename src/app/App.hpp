@@ -60,8 +60,11 @@ private:
     bool caretOn() const;
     DragVisual buildDragVisual();
 
-    // Screen cursor -> canvas/world coordinates (accounts for the pan offset).
-    Vec2 worldMouse() const { return {mouse_.x - pan_.x, mouse_.y - pan_.y}; }
+    // Screen cursor -> canvas/world coordinates (accounts for pan + zoom).
+    Vec2 worldMouse() const {
+        return {(mouse_.x - pan_.x) / zoom_, (mouse_.y - pan_.y) / zoom_};
+    }
+    void moveOverlayToNextMonitor();
 
     // DONE panel helpers.
     void layoutDonePanel(int winW, int winH);
@@ -91,11 +94,12 @@ private:
     std::unordered_set<TaskId> highlightSet_;
     double highlightUntil_ = 0.0;
 
-    // Canvas panning (view offset applied to the tree; screen-space UI is unaffected).
-    Vec2 pan_;
-    bool panning_ = false;
-    Vec2 panGrab_;     // screen cursor at pan start
-    Vec2 panOrigin_;   // pan_ at pan start
+    // Canvas view transform (screen = pan + zoom * world). Screen-space UI is unaffected.
+    Vec2  pan_;
+    float zoom_ = 1.f;
+    bool  panning_ = false;
+    Vec2  panGrab_;     // screen cursor at pan start
+    Vec2  panOrigin_;   // pan_ at pan start
 
     // DONE side panel state.
     bool  pinned_ = false;           // autohide off when true

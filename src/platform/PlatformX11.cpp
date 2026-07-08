@@ -42,6 +42,13 @@ bool PlatformX11::init(const char* title) {
     glfwMakeContextCurrent(win_);
     glfwSwapInterval(1);
 
+    // Start on the primary monitor's index (which need not be monitors[0]).
+    int count = 0;
+    GLFWmonitor** mons = glfwGetMonitors(&count);
+    GLFWmonitor* primary = glfwGetPrimaryMonitor();
+    for (int i = 0; i < count; ++i)
+        if (mons[i] == primary) { monitorIndex_ = i; break; }
+
     applyEwmhHints();
     coverPrimaryMonitor();
     return true;
@@ -68,16 +75,27 @@ void PlatformX11::applyEwmhHints() {
     XFlush(d);
 }
 
-void PlatformX11::coverPrimaryMonitor() {
+void PlatformX11::coverMonitorIndex(int index) {
     if (!win_) return;
-    GLFWmonitor* mon = glfwGetPrimaryMonitor();
-    if (!mon) return;
+    int count = 0;
+    GLFWmonitor** mons = glfwGetMonitors(&count);
+    if (count <= 0) return;
+    monitorIndex_ = ((index % count) + count) % count; // wrap
+    GLFWmonitor* mon = mons[monitorIndex_];
     int mx = 0, my = 0;
     glfwGetMonitorPos(mon, &mx, &my);
     if (const GLFWvidmode* mode = glfwGetVideoMode(mon)) {
         glfwSetWindowPos(win_, mx, my);
         glfwSetWindowSize(win_, mode->width, mode->height);
     }
+}
+
+void PlatformX11::coverPrimaryMonitor() { coverMonitorIndex(monitorIndex_); }
+
+void PlatformX11::moveToNextMonitor() {
+    int count = 0;
+    glfwGetMonitors(&count);
+    if (count > 1) coverMonitorIndex(monitorIndex_ + 1);
 }
 
 void PlatformX11::showOverlay() {

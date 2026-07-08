@@ -16,8 +16,11 @@ struct IPlatform {
 
     virtual GLFWwindow* window() = 0;
 
-    // Size/position the (borderless) window to cover the primary monitor.
+    // Size/position the (borderless) window to cover the current monitor.
     virtual void coverPrimaryMonitor() = 0;
+
+    // Move the overlay to the next monitor (wraps around) for multi-monitor setups.
+    virtual void moveToNextMonitor() = 0;
 
     virtual void showOverlay() = 0;             // map + raise + focus
     virtual void hideOverlay() = 0;             // unmap

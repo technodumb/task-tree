@@ -76,9 +76,12 @@ void App::onKey(int key, int action, int mods) {
 
     if (key == GLFW_KEY_ESCAPE && drag_.active()) { drag_.cancel(); return; }
 
-    if ((mods & GLFW_MOD_CONTROL) && key == GLFW_KEY_V) {
-        if (const char* clip = glfwGetClipboardString(platform_.window())) input_.insert(clip);
-        return;
+    if (mods & GLFW_MOD_CONTROL) {
+        if (key == GLFW_KEY_V) {
+            if (const char* clip = glfwGetClipboardString(platform_.window())) input_.insert(clip);
+            return;
+        }
+        if (key == GLFW_KEY_M) { moveOverlayToNextMonitor(); return; } // next monitor
     }
 
     switch (input_.onKey(key, mods)) {
@@ -101,7 +104,8 @@ void App::onMouseButton(int button, int action, int mods) {
         return;
     }
 
-    // Pan the canvas: middle-drag, or Alt + left-drag.
+    // Pan the canvas with middle-drag. (Alt+drag is intentionally NOT used — the window
+    // manager grabs Alt+drag to move the whole window; left-drag on empty canvas pans.)
     if (button == GLFW_MOUSE_BUTTON_MIDDLE) {
         if (action == GLFW_PRESS) { panning_ = true; panGrab_ = mouse_; panOrigin_ = pan_; }
         else if (action == GLFW_RELEASE) panning_ = false;
@@ -110,10 +114,6 @@ void App::onMouseButton(int button, int action, int mods) {
     if (button != GLFW_MOUSE_BUTTON_LEFT) return;
 
     if (action == GLFW_PRESS) {
-        if (mods & GLFW_MOD_ALT) {
-            panning_ = true; panGrab_ = mouse_; panOrigin_ = pan_;
-            return;
-        }
         // Autohide toggle button.
         if (donePanel_.visible && donePanel_.pinButton.contains(mouse_.x, mouse_.y)) {
             pinned_ = !pinned_;
@@ -127,8 +127,8 @@ void App::onMouseButton(int button, int action, int mods) {
         lastClickTime_ = dbl ? 0.0 : t;
         lastClickPos_ = mouse_;
         if (dbl) { handleDoubleClick(); return; }
-        // Single press: DONE panel toggles a row's children (screen space); the canvas
-        // starts a drag (world space).
+        // Single press: DONE panel toggles a row's children (screen space); on the
+        // canvas, a node starts a drag, empty space starts a pan (world space).
         if (pointInPanel(mouse_)) {
             const TaskId id = hitTestDone(mouse_);
             if (id != 0) {
@@ -140,6 +140,8 @@ void App::onMouseButton(int button, int action, int mods) {
             if (id != 0) {
                 auto it = rects_.find(id);
                 if (it != rects_.end()) drag_.begin(id, worldMouse(), it->second);
+            } else {
+                panning_ = true; panGrab_ = mouse_; panOrigin_ = pan_; // drag empty bg to pan
             }
         }
     } else if (action == GLFW_RELEASE) {
@@ -171,14 +173,40 @@ void App::onScroll(double dx, double dy) {
         scrollY_ = std::max(0.f, std::min(scrollY_, doneMaxScroll_));
         return;
     }
-    // Over the canvas: pan. Vertical wheel pans vertically; Shift+wheel (or a
-    // horizontal wheel) pans horizontally.
-    const bool shift = glfwGetKey(platform_.window(), GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
-                       glfwGetKey(platform_.window(), GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
+    GLFWwindow* w = platform_.window();
+    const bool ctrl = glfwGetKey(w, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+                      glfwGetKey(w, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+    const bool shift = glfwGetKey(w, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
+                       glfwGetKey(w, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
+
+    // Ctrl+scroll: zoom about the cursor (keep the world point under it fixed).
+    if (ctrl && dy != 0.0) {
+        const float factor = (dy > 0.0) ? 1.1f : 1.f / 1.1f;
+        const float nz = std::max(0.3f, std::min(3.0f, zoom_ * factor));
+        const float wx = (mouse_.x - pan_.x) / zoom_;
+        const float wy = (mouse_.y - pan_.y) / zoom_;
+        pan_.x = mouse_.x - nz * wx;
+        pan_.y = mouse_.y - nz * wy;
+        zoom_ = nz;
+        return;
+    }
+
+    // Otherwise pan: vertical wheel pans vertically; Shift+wheel (or a horizontal
+    // wheel) pans horizontally.
     const float step = 48.f;
     pan_.x += static_cast<float>(dx) * step;
     if (shift) pan_.x += static_cast<float>(dy) * step;
     else       pan_.y += static_cast<float>(dy) * step;
+}
+
+void App::moveOverlayToNextMonitor() {
+    platform_.moveToNextMonitor();
+    if (mode_ == Mode::Hidden) {
+        mode_ = Mode::Full;
+        input_.clear();
+        input_.setFocused(true);
+        platform_.showOverlay();
+    }
 }
 
 // ---- task creation + classification ----------------------------------------
@@ -293,7 +321,7 @@ void App::drawScene(int winW, int winH, float dpr) {
             if (now < highlightUntil_) hi = static_cast<float>((highlightUntil_ - now) / kFlashDuration);
             else highlightSet_.clear();
         }
-        renderer_.drawTree(forest_, drawRects, cfg_, dv, pan_, highlightSet_, hi);
+        renderer_.drawTree(forest_, drawRects, cfg_, dv, pan_, zoom_, highlightSet_, hi);
         if (donePanel_.visible)
             renderer_.drawDonePanel(donePanel_, forest_, doneRows_, cfg_);
         renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(), cfg_, false);
@@ -400,7 +428,8 @@ void App::handleDoubleClick() {
             if (drag_.active()) drag_.cancel();
             if (forest_.markDone(id)) { forceRelayout(); save(); }
         } else {
-            pan_ = {0.f, 0.f}; // double-click empty canvas recenters the view
+            pan_ = {0.f, 0.f}; // double-click empty canvas recenters + resets zoom
+            zoom_ = 1.f;
         }
     }
 }

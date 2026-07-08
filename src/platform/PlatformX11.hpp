@@ -29,6 +29,7 @@ public:
     // IPlatform
     GLFWwindow* window() override { return win_; }
     void coverPrimaryMonitor() override;
+    void moveToNextMonitor() override;
     void showOverlay() override;
     void hideOverlay() override;
     bool overlayVisible() const override { return visible_; }
@@ -37,10 +38,12 @@ public:
 
 private:
     void applyEwmhHints();
+    void coverMonitorIndex(int index); // clamps/wraps into the monitor list
 
     GLFWwindow* win_ = nullptr;
     Hotkeys     hotkeys_;
     bool        visible_ = false;
+    int         monitorIndex_ = 0;
 };
 
 } // namespace tt
