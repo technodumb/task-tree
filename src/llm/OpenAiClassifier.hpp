@@ -18,8 +18,7 @@ public:
                      float confidenceThreshold, int timeoutMs);
 
     bool enabled() const override { return true; }
-    void classify(std::string newText,
-                  std::vector<std::pair<TaskId, std::string>> existing,
+    void classify(std::string newText, std::string existingTree,
                   ClassifyCallback done) override;
 
 private:

@@ -32,11 +32,12 @@ struct IClassifier {
     // every task stays standalone.
     virtual bool enabled() const = 0;
 
-    // Classify `newText` against a snapshot of existing (id, text) pairs, then call
-    // `done` exactly once with the result. Must not throw into the caller and must
-    // return promptly (do the work asynchronously).
-    virtual void classify(std::string newText,
-                          std::vector<std::pair<TaskId, std::string>> existing,
+    // Classify `newText` against `existingTree` — the current (non-DONE) task tree as
+    // an indented outline where indentation denotes subtasks and each line is
+    // "[id] text". Passing the structure (not just a flat list) lets the model place
+    // the task precisely and use parent/sibling context. Calls `done` exactly once;
+    // must not throw into the caller and must do the work asynchronously.
+    virtual void classify(std::string newText, std::string existingTree,
                           ClassifyCallback done) = 0;
 };
 

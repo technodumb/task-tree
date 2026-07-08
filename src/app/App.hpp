@@ -55,6 +55,9 @@ private:
     void forceRelayout() { needsRelayout_ = true; }
     void commitInput();
     void flashPath(TaskId leaf);   // briefly highlight root -> leaf after an add/classify
+    // Current canvas tree (excluding DONE and `exclude`) as an indented "[id] text"
+    // outline for the classifier.
+    std::string buildTreeOutline(TaskId exclude) const;
     void save();
     TaskId hitTest(Vec2 p) const;
     bool caretOn() const;

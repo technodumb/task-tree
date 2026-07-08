@@ -224,12 +224,7 @@ void App::commitInput() {
     const TaskId id = forest_.addTask(txt, kNoParent, nowMs());
 
     if (classifier_.enabled()) {
-        std::vector<std::pair<TaskId, std::string>> existing;
-        existing.reserve(forest_.nodes.size());
-        for (const auto& [eid, t] : forest_.nodes)
-            if (eid != id && !forest_.isInDoneSection(eid)) // never classify against DONE tasks
-                existing.emplace_back(eid, t.text);
-        classifier_.classify(txt, std::move(existing),
+        classifier_.classify(txt, buildTreeOutline(id),
                               [this, id](ClassifyResult r) { pushClassification(id, r); });
     }
 
@@ -250,6 +245,27 @@ void App::flashPath(TaskId leaf) {
         cur = t->parent;
     }
     highlightUntil_ = glfwGetTime() + kFlashDuration;
+}
+
+std::string App::buildTreeOutline(TaskId exclude) const {
+    // Pre-order over canvas roots (DONE roots live in a separate list, so they're
+    // naturally excluded). Indentation = depth; each line is "[id] text".
+    std::string out;
+    std::vector<std::pair<TaskId, int>> stack;
+    for (auto it = forest_.roots.rbegin(); it != forest_.roots.rend(); ++it)
+        stack.emplace_back(*it, 0);
+    while (!stack.empty()) {
+        const auto [id, depth] = stack.back();
+        stack.pop_back();
+        if (id == exclude) continue; // skip the just-created node
+        const Task* t = forest_.get(id);
+        if (!t) continue;
+        out.append(static_cast<std::size_t>(depth) * 2, ' ');
+        out += "[" + std::to_string(id) + "] " + t->text + "\n";
+        for (auto cit = t->children.rbegin(); cit != t->children.rend(); ++cit)
+            stack.emplace_back(*cit, depth + 1);
+    }
+    return out;
 }
 
 void App::pushClassification(TaskId newTask, ClassifyResult result) {
@@ -290,8 +306,17 @@ void App::applyPendingClassifications() {
             continue;
         }
         const bool childOf = (r.relation == Relation::ChildOf);
-        const bool c = childOf ? forest_.reparent(id, r.targetId, kAppendIndex)
-                               : forest_.reparent(r.targetId, id, kAppendIndex); // ParentOf
+        bool c = false;
+        if (childOf) {
+            c = forest_.reparent(id, r.targetId, kAppendIndex);
+        } else {
+            // parent_of: insert the new task as target's parent — it takes target's
+            // current slot (under target's old parent) and target becomes its child.
+            // This is how a node lands BETWEEN an existing task and its parent.
+            const TaskId oldParent = forest_.get(r.targetId)->parent;
+            c = forest_.reparent(id, oldParent, kAppendIndex) &&
+                forest_.reparent(r.targetId, id, kAppendIndex);
+        }
         if (c) {
             changed = true;
             flashLeaf = id;

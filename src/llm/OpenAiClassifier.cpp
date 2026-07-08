@@ -37,8 +37,7 @@ std::string extractJsonObject(const std::string& s) {
 
 ClassifyResult run(const std::string& endpoint, const std::string& apiKey,
                    const std::string& model, float confThreshold, int timeoutMs,
-                   const std::string& newText,
-                   const std::vector<std::pair<TaskId, std::string>>& existing) {
+                   const std::string& newText, const std::string& tree) {
     ClassifyResult fallback; // Standalone
     const bool L = llmlog::enabled();
     std::string log;
@@ -58,23 +57,24 @@ ClassifyResult run(const std::string& endpoint, const std::string& apiKey,
             prefix = endpoint.substr(slash); // e.g. "/v1"
         }
 
-        std::string listing;
-        for (const auto& [id, text] : existing) {
-            listing += "  " + std::to_string(id) + ": " + text + "\n";
-        }
+        const std::string treeStr = tree.empty() ? "(empty)\n" : tree;
 
         const std::string sys =
-            "You organise tasks into a tree. Given a NEW task and a list of EXISTING "
-            "tasks (id: text), decide the relationship. Reply with ONLY JSON: "
+            "You organise tasks into a tree. You are given the CURRENT task tree as an "
+            "indented outline: indentation denotes subtasks and each line is '[id] text'. "
+            "Decide where a NEW task belongs and reply with ONLY JSON: "
             "{\"relation\":\"standalone|child_of|parent_of\",\"targetId\":<id or null>,"
-            "\"confidence\":<0..1>}. Use child_of when the new task belongs under an "
-            "existing task, parent_of when existing tasks belong under the new one, "
-            "otherwise standalone.";
+            "\"confidence\":<0..1>}. child_of = the new task is a subtask of targetId. "
+            "parent_of = the new task becomes the PARENT of targetId: it takes targetId's "
+            "current position in the tree and targetId becomes its subtask — use this to "
+            "insert the new task BETWEEN targetId and targetId's current parent. "
+            "standalone = it starts a new top-level task. Use the surrounding context "
+            "(a task's parent and siblings) to place it precisely.";
         const std::string user =
-            "NEW task:\n" + newText + "\n\nEXISTING tasks:\n" + (listing.empty() ? "(none)" : listing);
+            "CURRENT tree:\n" + treeStr + "\nNEW task:\n" + newText;
 
         add("provider: openai-compatible\nendpoint: " + endpoint + "\nmodel: " + model + "\n");
-        add("NEW: " + newText + "\nEXISTING:\n" + (listing.empty() ? "  (none)\n" : listing));
+        add("NEW: " + newText + "\nTREE:\n" + treeStr);
         add("--- system ---\n" + sys + "\n--- user ---\n" + user + "\n");
 
         json body = {
@@ -136,12 +136,11 @@ ClassifyResult run(const std::string& endpoint, const std::string& apiKey,
 
 } // namespace
 
-void OpenAiClassifier::classify(std::string newText,
-                                std::vector<std::pair<TaskId, std::string>> existing,
+void OpenAiClassifier::classify(std::string newText, std::string existingTree,
                                 ClassifyCallback done) {
     std::thread([=, endpoint = endpoint_, key = apiKey_, model = model_,
                  conf = confThreshold_, timeout = timeoutMs_]() {
-        ClassifyResult r = run(endpoint, key, model, conf, timeout, newText, existing);
+        ClassifyResult r = run(endpoint, key, model, conf, timeout, newText, existingTree);
         if (done) done(r);
     }).detach();
 }
