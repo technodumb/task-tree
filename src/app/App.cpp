@@ -248,22 +248,24 @@ void App::flashPath(TaskId leaf) {
 }
 
 std::string App::buildTreeOutline(TaskId exclude) const {
-    // Pre-order over canvas roots (DONE roots live in a separate list, so they're
-    // naturally excluded). Indentation = depth; each line is "[id] text".
+    // One line per canvas node: "[id] parent=<pid|none>: text". Explicit parent ids
+    // (not indentation) so the model reconstructs the tree unambiguously. Pre-order
+    // over canvas roots (DONE roots live in a separate list, so they're excluded).
     std::string out;
-    std::vector<std::pair<TaskId, int>> stack;
+    std::vector<TaskId> stack;
     for (auto it = forest_.roots.rbegin(); it != forest_.roots.rend(); ++it)
-        stack.emplace_back(*it, 0);
+        stack.push_back(*it);
     while (!stack.empty()) {
-        const auto [id, depth] = stack.back();
+        const TaskId id = stack.back();
         stack.pop_back();
         if (id == exclude) continue; // skip the just-created node
         const Task* t = forest_.get(id);
         if (!t) continue;
-        out.append(static_cast<std::size_t>(depth) * 2, ' ');
-        out += "[" + std::to_string(id) + "] " + t->text + "\n";
+        out += "[" + std::to_string(id) + "] parent=";
+        out += (t->parent == kNoParent) ? "none" : std::to_string(t->parent);
+        out += ": " + t->text + "\n";
         for (auto cit = t->children.rbegin(); cit != t->children.rend(); ++cit)
-            stack.emplace_back(*cit, depth + 1);
+            stack.push_back(*cit);
     }
     return out;
 }

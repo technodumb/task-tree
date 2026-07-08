@@ -60,8 +60,9 @@ ClassifyResult run(const std::string& endpoint, const std::string& apiKey,
         const std::string treeStr = tree.empty() ? "(empty)\n" : tree;
 
         const std::string sys =
-            "You organise tasks into a tree. You are given the CURRENT task tree as an "
-            "indented outline: indentation denotes subtasks and each line is '[id] text'. "
+            "You organise tasks into a tree. The CURRENT tasks are listed one per line as "
+            "'[id] parent=<pid|none>: text', where parent is that task's parent id (none = "
+            "top-level). Reconstruct the hierarchy from those parent ids. "
             "Decide where a NEW task belongs and reply with ONLY JSON: "
             "{\"relation\":\"standalone|child_of|parent_of\",\"targetId\":<id or null>,"
             "\"confidence\":<0..1>}. child_of = the new task is a subtask of targetId. "
@@ -71,7 +72,7 @@ ClassifyResult run(const std::string& endpoint, const std::string& apiKey,
             "standalone = it starts a new top-level task. Use the surrounding context "
             "(a task's parent and siblings) to place it precisely.";
         const std::string user =
-            "CURRENT tree:\n" + treeStr + "\nNEW task:\n" + newText;
+            "CURRENT tasks:\n" + treeStr + "\nNEW task:\n" + newText;
 
         add("provider: openai-compatible\nendpoint: " + endpoint + "\nmodel: " + model + "\n");
         add("NEW: " + newText + "\nTREE:\n" + treeStr);
