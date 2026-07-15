@@ -19,6 +19,11 @@ if(NOT MSVC)
 endif()
 
 option(TASKTREE_BUILD_TESTS "Build unit tests" ON)
+# Development-only features (LLM request/response log, and future dev diagnostics).
+# ON  -> development build (this is the default)
+# OFF -> production build; dev code compiles to nothing and its .cpp files are excluded.
+# Use the presets: `cmake --preset dev` / `cmake --preset prod`.
+option(TASKTREE_DEV "Include development-only features" ON)
 
 # ---- System deps ------------------------------------------------------------
 find_package(Threads REQUIRED)
@@ -59,12 +64,25 @@ add_executable(tasktree
     src/ui/TextInput.cpp
     src/ui/DragController.cpp
     src/llm/OllamaClassifier.cpp
-    src/llm/OpenAiClassifier.cpp
-    src/llm/LlmLog.cpp)
+    src/llm/OpenAiClassifier.cpp)
 target_include_directories(tasktree PRIVATE src)
 target_compile_definitions(tasktree PRIVATE
     GLFW_INCLUDE_NONE           # let glad own the GL headers
     TASKTREE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
+
+# ---- Development-only features (gated by TASKTREE_DEV) ----------------------
+# The macro flips the header stubs (see src/llm/LlmLog.hpp): in dev the real logger
+# is declared + compiled; in prod it becomes inline no-ops and the .cpp is dropped.
+# Add future dev-only code the same way: guard with `#if TASKTREE_DEV` and add its
+# sources here.
+if(TASKTREE_DEV)
+    target_compile_definitions(tasktree PRIVATE TASKTREE_DEV=1)
+    target_sources(tasktree PRIVATE src/llm/LlmLog.cpp)
+    message(STATUS "TaskTree: DEVELOPMENT build (dev features ON — LLM request logging).")
+else()
+    target_compile_definitions(tasktree PRIVATE TASKTREE_DEV=0)
+    message(STATUS "TaskTree: PRODUCTION build (dev features stripped).")
+endif()
 target_link_libraries(tasktree PRIVATE
     tt_core tt_io
     glfw glad_gl_core_33 nanovg

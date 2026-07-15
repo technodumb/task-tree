@@ -1,0 +1,32 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "dev",
+      "displayName": "Development (dev features on, debuggable)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "TASKTREE_DEV": "ON",
+        "TASKTREE_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "prod",
+      "displayName": "Production (dev features stripped, small + optimized)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-prod",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "TASKTREE_DEV": "OFF",
+        "TASKTREE_BUILD_TESTS": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "prod", "configurePreset": "prod" }
+  ]
+}
