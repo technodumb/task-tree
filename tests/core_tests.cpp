@@ -1,6 +1,7 @@
 // Dependency-free verification of the pure core (model + tidy layout).
 // Built by CMake as the `core_tests` CTest target; also compilable standalone:
 //   g++ -std=c++17 -I ../src core_tests.cpp ../src/model/Forest.cpp ../src/layout/TidyLayout.cpp
+#include "app/DevRoute.hpp"
 #include "layout/TidyLayout.hpp"
 #include "model/Task.hpp"
 
@@ -171,6 +172,36 @@ int main() {
         CHECK(!f.get(a)->done, "a not done after restore");
         CHECK(std::find(f.roots.begin(), f.roots.end(), a) != f.roots.end(), "a back on the canvas");
         CHECK(f.doneRoots.empty(), "doneRoots empty after restore");
+    }
+
+    { // dev fast-path: ttd> detection + dev-root find/create
+        CHECK(isDevTask("ttd> do a thing"), "ttd> prefix detected");
+        CHECK(isDevTask("TTD>caps, no space"), "case-insensitive, space after > optional");
+        CHECK(isDevTask("   ttd> leading whitespace ignored"), "leading whitespace ignored");
+        CHECK(!isDevTask("todo> not a dev task"), "non-marker prefix is not a dev task");
+        CHECK(!isDevTask("do ttd> in the middle"), "marker only counts at the start");
+        CHECK(!isDevTask(""), "empty text is not a dev task");
+        CHECK(!isDevTask("ttd"), "bare 'ttd' without '>' is not a dev task");
+
+        Forest f;
+        f.addTask("unrelated root");
+        const TaskId dev1 = ensureDevRoot(f, 0);
+        CHECK(f.get(dev1) && f.get(dev1)->text == kDevNodeTitle, "dev root created with the right title");
+        CHECK(f.get(dev1)->parent == kNoParent, "dev root is a canvas root");
+        const TaskId dev2 = ensureDevRoot(f, 0);
+        CHECK(dev1 == dev2, "second call reuses the existing dev root (no duplicate)");
+        TaskId task = f.addTask("ttd> a dev task", dev1);
+        CHECK(f.get(task)->parent == dev1, "dev task lands under the dev root");
+
+        Forest g; // case-insensitive reuse of a pre-existing dev node
+        const TaskId existing = g.addTask("Tasktree Dev");
+        CHECK(ensureDevRoot(g, 0) == existing, "existing dev root reused case-insensitively");
+
+        Forest h; // a DONE dev root must not be reused (only canvas roots are scanned)
+        const TaskId doneDev = h.addTask(kDevNodeTitle);
+        h.markDone(doneDev);
+        const TaskId freshDev = ensureDevRoot(h, 0);
+        CHECK(freshDev != doneDev, "does not resurrect a DONE dev node; makes a fresh one");
     }
 
     std::printf("\n%d checks, %d failures\n", g_checks, g_fail);

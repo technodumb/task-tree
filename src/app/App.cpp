@@ -9,6 +9,7 @@
 
 #include <GLFW/glfw3.h>
 
+#include "app/DevRoute.hpp"
 #include "llm/LlmLog.hpp"
 #include "model/Store.hpp"
 
@@ -221,11 +222,17 @@ void App::commitInput() {
     const std::string txt = trim(input_.text());
     if (txt.empty()) { if (mode_ == Mode::QuickAdd) hide(); return; }
 
-    const TaskId id = forest_.addTask(txt, kNoParent, nowMs());
-
-    if (classifier_.enabled()) {
-        classifier_.classify(txt, buildTreeOutline(id),
-                              [this, id](ClassifyResult r) { pushClassification(id, r); });
+    TaskId id;
+    if (isDevTask(txt)) {
+        // Dev fast path: TaskTree's own to-dos ("ttd> ...") park directly under the
+        // "tasktree dev" node and skip LLM classification entirely.
+        id = forest_.addTask(txt, ensureDevRoot(forest_, nowMs()), nowMs());
+    } else {
+        id = forest_.addTask(txt, kNoParent, nowMs());
+        if (classifier_.enabled()) {
+            classifier_.classify(txt, buildTreeOutline(id),
+                                  [this, id](ClassifyResult r) { pushClassification(id, r); });
+        }
     }
 
     input_.clear();
