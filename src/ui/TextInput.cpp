@@ -25,6 +25,7 @@ void appendUtf8(std::string& s, unsigned int cp) {
 }
 
 bool isContinuation(unsigned char c) { return (c & 0xC0) == 0x80; }
+bool isWs(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
 
 } // namespace
 
@@ -39,6 +40,19 @@ std::size_t TextInput::nextBoundary(std::size_t i) const {
     if (i >= text_.size()) return text_.size();
     ++i;
     while (i < text_.size() && isContinuation(static_cast<unsigned char>(text_[i]))) ++i;
+    return i;
+}
+
+std::size_t TextInput::prevWordStart(std::size_t i) const {
+    while (i > 0 && isWs(text_[i - 1])) --i;   // skip whitespace before the caret
+    while (i > 0 && !isWs(text_[i - 1])) --i;   // skip the word (multibyte-safe: word runs stop at whitespace)
+    return i;
+}
+
+std::size_t TextInput::nextWordEnd(std::size_t i) const {
+    const std::size_t n = text_.size();
+    while (i < n && isWs(text_[i])) ++i;        // skip whitespace after the caret
+    while (i < n && !isWs(text_[i])) ++i;       // skip the word
     return i;
 }
 
@@ -59,7 +73,8 @@ void TextInput::insert(const std::string& utf8) {
     caret_ += clean.size();
 }
 
-TextInput::Action TextInput::onKey(int key, int /*mods*/) {
+TextInput::Action TextInput::onKey(int key, int mods) {
+    const bool ctrl = (mods & GLFW_MOD_CONTROL) != 0;
     switch (key) {
         case GLFW_KEY_ENTER:
         case GLFW_KEY_KP_ENTER:
@@ -68,14 +83,14 @@ TextInput::Action TextInput::onKey(int key, int /*mods*/) {
             return Action::Cancel;
         case GLFW_KEY_BACKSPACE:
             if (caret_ > 0) {
-                const std::size_t from = prevBoundary(caret_);
+                const std::size_t from = ctrl ? prevWordStart(caret_) : prevBoundary(caret_);
                 text_.erase(from, caret_ - from);
                 caret_ = from;
             }
             break;
         case GLFW_KEY_DELETE:
             if (caret_ < text_.size()) {
-                const std::size_t to = nextBoundary(caret_);
+                const std::size_t to = ctrl ? nextWordEnd(caret_) : nextBoundary(caret_);
                 text_.erase(caret_, to - caret_);
             }
             break;
