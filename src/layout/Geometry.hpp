@@ -34,9 +34,6 @@ struct Rect {
     bool contains(float px, float py) const {
         return px >= x && px <= x + w && py >= y && py <= y + h;
     }
-
-    // Grow the rectangle by `dx`/`dy` on every side.
-    Rect inflated(float dx, float dy) const { return {x - dx, y - dy, w + 2 * dx, h + 2 * dy}; }
 };
 
 // Hit test against a rounded rectangle: inside the straight edges always counts;

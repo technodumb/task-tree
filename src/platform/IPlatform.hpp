@@ -24,7 +24,6 @@ struct IPlatform {
 
     virtual void showOverlay() = 0;             // map + raise + focus
     virtual void hideOverlay() = 0;             // unmap
-    virtual bool overlayVisible() const = 0;
 
     // Called on the main thread each loop iteration: drains queued hotkey presses
     // and invokes their callbacks (so all GL/window calls stay on the main thread).

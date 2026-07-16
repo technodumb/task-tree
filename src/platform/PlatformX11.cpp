@@ -103,13 +103,11 @@ void PlatformX11::showOverlay() {
     coverPrimaryMonitor();      // re-cover in case the monitor changed
     glfwShowWindow(win_);
     glfwFocusWindow(win_);      // borderless windows don't always auto-focus on X11
-    visible_ = true;
 }
 
 void PlatformX11::hideOverlay() {
     if (!win_) return;
     glfwHideWindow(win_);
-    visible_ = false;
 }
 
 void PlatformX11::wake() { glfwPostEmptyEvent(); }

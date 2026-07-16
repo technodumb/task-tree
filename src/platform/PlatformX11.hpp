@@ -32,7 +32,6 @@ public:
     void moveToNextMonitor() override;
     void showOverlay() override;
     void hideOverlay() override;
-    bool overlayVisible() const override { return visible_; }
     void pumpPlatformEvents() override { hotkeys_.drain(); }
     void wake() override;
 
@@ -42,7 +41,6 @@ private:
 
     GLFWwindow* win_ = nullptr;
     Hotkeys     hotkeys_;
-    bool        visible_ = false;
     int         monitorIndex_ = 0;
 };
 
