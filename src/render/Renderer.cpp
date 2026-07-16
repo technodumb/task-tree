@@ -256,7 +256,6 @@ void Renderer::drawInput(float screenW, float screenH, const std::string& text,
     nvgFontSize(vg_, fontSize_);
     float asc = 0, desc = 0, lineH = 0;
     nvgTextMetrics(vg_, &asc, &desc, &lineH);
-    (void)asc; (void)desc;
 
     // Wrap the input into visual lines so the box grows as text is typed.
     struct Row { int start, end, next; };
@@ -335,9 +334,10 @@ void Renderer::drawInput(float screenW, float screenH, const std::string& text,
             adv = nvgTextBounds(vg_, 0, 0, text.c_str() + rows[caretRow].start,
                                 text.c_str() + cb, nullptr);
         const float caretX = tx + adv;
+        const float glyphH = asc - desc;   // caret spans the text's glyph height
         nvgBeginPath(vg_);
-        nvgMoveTo(vg_, caretX, caretY + 2.f);
-        nvgLineTo(vg_, caretX, caretY + lineH - 2.f);
+        nvgMoveTo(vg_, caretX, caretY);
+        nvgLineTo(vg_, caretX, caretY + glyphH);
         nvgStrokeColor(vg_, col(cfg.nodeText));
         nvgStrokeWidth(vg_, 1.4f);
         nvgStroke(vg_);
