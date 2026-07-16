@@ -26,8 +26,9 @@ public:
 private:
     std::size_t prevBoundary(std::size_t i) const;
     std::size_t nextBoundary(std::size_t i) const;
-    std::size_t prevWordStart(std::size_t i) const;  // for Ctrl+Backspace
-    std::size_t nextWordEnd(std::size_t i) const;     // for Ctrl+Delete
+    std::size_t prevWordStart(std::size_t i) const;  // Ctrl+Backspace / Ctrl+Left
+    std::size_t nextWordEnd(std::size_t i) const;     // Ctrl+Delete
+    std::size_t nextWordStart(std::size_t i) const;   // Ctrl+Right
 
     std::string text_;
     std::size_t caret_ = 0;

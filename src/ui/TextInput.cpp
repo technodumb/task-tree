@@ -56,6 +56,13 @@ std::size_t TextInput::nextWordEnd(std::size_t i) const {
     return i;
 }
 
+std::size_t TextInput::nextWordStart(std::size_t i) const {
+    const std::size_t n = text_.size();
+    while (i < n && !isWs(text_[i])) ++i;       // skip rest of the current word
+    while (i < n && isWs(text_[i])) ++i;        // then whitespace -> start of next word
+    return i;
+}
+
 void TextInput::onChar(unsigned int codepoint) {
     std::string enc;
     appendUtf8(enc, codepoint);
@@ -94,8 +101,8 @@ TextInput::Action TextInput::onKey(int key, int mods) {
                 text_.erase(caret_, to - caret_);
             }
             break;
-        case GLFW_KEY_LEFT:  caret_ = prevBoundary(caret_); break;
-        case GLFW_KEY_RIGHT: caret_ = nextBoundary(caret_); break;
+        case GLFW_KEY_LEFT:  caret_ = ctrl ? prevWordStart(caret_) : prevBoundary(caret_); break;
+        case GLFW_KEY_RIGHT: caret_ = ctrl ? nextWordStart(caret_) : nextBoundary(caret_); break;
         case GLFW_KEY_HOME:  caret_ = 0; break;
         case GLFW_KEY_END:   caret_ = text_.size(); break;
         default: break;
