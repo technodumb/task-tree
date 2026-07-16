@@ -247,13 +247,53 @@ void Renderer::drawInput(float screenW, float screenH, const std::string& text,
                          std::size_t caretByte, bool caretOn, const Config& cfg,
                          bool quickAddMode) {
     const float boxW = std::min(620.f, std::max(360.f, screenW * 0.5f));
-    const float boxH = fontSize_ + 2 * padY_ + 10.f;
     const float bx = (screenW - boxW) * 0.5f;
-    // Full overlay: input pinned to the bottom-centre. Quick-add: floating box ~centre.
-    const float by = quickAddMode ? (screenH * 0.42f) : (screenH - boxH - 40.f);
     const float r = cfg.cornerRadius;
+    const float contentW = boxW - 2 * padX_;
+    const float pad = padY_;
 
-    // Drop shadow (mainly for quick-add, where there is no scrim behind it).
+    nvgFontFaceId(vg_, font_);
+    nvgFontSize(vg_, fontSize_);
+    float asc = 0, desc = 0, lineH = 0;
+    nvgTextMetrics(vg_, &asc, &desc, &lineH);
+    (void)asc; (void)desc;
+
+    // Wrap the input into visual lines so the box grows as text is typed.
+    struct Row { int start, end, next; };
+    std::vector<Row> rows;
+    if (!text.empty()) {
+        const char* s = text.c_str();
+        const char* e = s + text.size();
+        const char* p = s;
+        NVGtextRow tr[8];
+        int n = 0;
+        while ((n = nvgTextBreakLines(vg_, p, e, contentW, tr, 8)) > 0) {
+            for (int i = 0; i < n; ++i)
+                rows.push_back({(int)(tr[i].start - s), (int)(tr[i].end - s), (int)(tr[i].next - s)});
+            p = tr[n - 1].next;
+        }
+    }
+    if (rows.empty()) rows.push_back({0, 0, 0});
+
+    // Which visual line holds the caret?
+    const int cb = (int)std::min(caretByte, text.size());
+    int caretRow = (int)rows.size() - 1;
+    for (int i = 0; i < (int)rows.size(); ++i)
+        if (cb >= rows[i].start && cb <= rows[i].next) { caretRow = i; if (cb < rows[i].next) break; }
+
+    const int maxLines = 10;                 // cap growth; scroll to keep the caret in view
+    const int total = (int)rows.size();
+    int firstRow = 0;
+    if (total > maxLines)
+        firstRow = std::max(0, std::min(caretRow - maxLines + 1, total - maxLines));
+    const int shown = std::min(total, maxLines);
+
+    const float boxH = shown * lineH + 2 * pad + 4.f;
+    // Quick-add (Ctrl+Alt+Enter): top anchored -> grows DOWN. Full overlay
+    // (Ctrl+Alt+Space): bottom anchored -> grows UP.
+    const float by = quickAddMode ? (screenH * 0.30f) : (screenH - 40.f - boxH);
+
+    // Drop shadow.
     NVGpaint shadow = nvgBoxGradient(vg_, bx, by + 4, boxW, boxH, r * 1.5f, 22.f,
                                      nvgRGBA(0, 0, 0, 150), nvgRGBA(0, 0, 0, 0));
     nvgBeginPath(vg_);
@@ -272,29 +312,32 @@ void Renderer::drawInput(float screenW, float screenH, const std::string& text,
     nvgStrokeWidth(vg_, 1.f);
     nvgStroke(vg_);
 
-    // Text (or placeholder).
+    // Text (or placeholder), top-aligned, one row per wrapped line.
     const float tx = bx + padX_;
-    const float ty = by + boxH * 0.5f;
-    nvgFontFaceId(vg_, font_);
-    nvgFontSize(vg_, fontSize_);
-    nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+    nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
     if (text.empty()) {
         nvgFillColor(vg_, col(cfg.nodeText, 0.4f));
-        nvgText(vg_, tx, ty, "Type a task, press Enter…", nullptr);
+        nvgText(vg_, tx, by + pad, "Type a task, press Enter…", nullptr);
     } else {
         nvgFillColor(vg_, col(cfg.nodeText));
-        nvgText(vg_, tx, ty, text.c_str(), end(text));
+        float ty = by + pad;
+        for (int i = firstRow; i < total; ++i) {
+            nvgText(vg_, tx, ty, text.c_str() + rows[i].start, text.c_str() + rows[i].end);
+            ty += lineH;
+        }
     }
 
-    // Caret.
+    // Caret on its wrapped line.
     if (caretOn) {
-        const std::string prefix = text.substr(0, std::min(caretByte, text.size()));
-        const float adv = prefix.empty() ? 0.f
-                        : nvgTextBounds(vg_, tx, ty, prefix.c_str(), end(prefix), nullptr);
+        const float caretY = by + pad + std::max(0, caretRow - firstRow) * lineH;
+        float adv = 0.f;
+        if (cb > rows[caretRow].start)
+            adv = nvgTextBounds(vg_, 0, 0, text.c_str() + rows[caretRow].start,
+                                text.c_str() + cb, nullptr);
         const float caretX = tx + adv;
         nvgBeginPath(vg_);
-        nvgMoveTo(vg_, caretX, by + 8);
-        nvgLineTo(vg_, caretX, by + boxH - 8);
+        nvgMoveTo(vg_, caretX, caretY + 2.f);
+        nvgLineTo(vg_, caretX, caretY + lineH - 2.f);
         nvgStrokeColor(vg_, col(cfg.nodeText));
         nvgStrokeWidth(vg_, 1.4f);
         nvgStroke(vg_);
