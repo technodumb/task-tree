@@ -3,8 +3,11 @@
 ## ttd dev workflow — run this at the START of every session
 
 The user develops TaskTree *through* their running TaskTree app: they plan in the task
-tree and mark dev work with a `ttd>` prefix. When you start a session in this repo,
-**proactively** pick up that work — don't wait to be asked:
+tree and mark dev work with a `ttd>` prefix. A read-only `SessionStart` hook
+(`scripts/ttd-scan.sh`, wired in `.claude/settings.json`) prints the pending `ttd>`
+tasks into your context at startup — so this works from **any** Claude instance in this
+folder. When you start a session here, **proactively** pick up that work — don't wait to
+be asked:
 
 1. Read `~/.local/share/tasktree/tasks.json`. Collect **canvas** (non-DONE) tasks whose
    text starts with `ttd>` (case-insensitive, optional space). These are dev tasks for you.

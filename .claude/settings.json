@@ -1,0 +1,12 @@
+{
+  "//": "Project settings shared with any Claude session in this repo. The SessionStart hook is READ-ONLY: it lists pending ttd> tasks (scripts/ttd-scan.sh) so the ttd workflow works from any instance without being told. No permissions are granted here.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/ttd-scan.sh\"" }
+        ]
+      }
+    ]
+  }
+}
