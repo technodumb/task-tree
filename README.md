@@ -95,7 +95,7 @@ src/layout/   Pure tidy-tree layout engine + geometry (unit tested)
 src/render/   NanoVG renderer (squircles, curved edges, input box)
 src/ui/       Single-line UTF-8 text input, drag & drop controller
 src/platform/ X11 overlay window + global hotkey grabber (behind IPlatform)
-src/llm/      Pluggable classifier seam (Null default, Ollama impl)
+src/llm/      Pluggable classifier seam (Null default, OpenAI-compatible impl)
 src/app/      App state machine, config, XDG paths
 docs/         FUTURE.md (roadmap), AGENTS.md (iterative dev loop), plans/
 ```

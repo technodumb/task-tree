@@ -47,8 +47,8 @@ how these get pulled into the next version's plan.
 
 ## Classifier (LLM)
 - **Generic provider system + connection modal (planned).** Today: `NullClassifier`
-  (off), `OllamaClassifier` (local HTTP), and `OpenAiClassifier` (any OpenAI-compatible
-  endpoint — Cerebras is wired via the `CEREBRAS_API_KEY` env var). Generalise this to
+  (off) and `OpenAiClassifier` (any OpenAI-compatible endpoint — Cerebras via the
+  `CEREBRAS_API_KEY` env var, or a local server like Ollama at `.../v1`). Generalise this to
   support *any* backend behind a single seam and make it fully user-configurable:
   - An in-app **modal** (no config-file editing) to add/edit connections: pick a
     provider *type* (local / OpenAI-compatible cloud / Ollama / Anthropic / custom

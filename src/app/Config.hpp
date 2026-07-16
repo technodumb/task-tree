@@ -48,9 +48,10 @@ struct Config {
     Color doneText     {0.86f, 0.97f, 0.89f, 1.f};
     Color doneTitle    {0.55f, 0.94f, 0.68f, 1.f};
 
-    // local LLM classifier (disabled by default)
+    // local / self-hosted LLM classifier (disabled by default). Endpoint is an
+    // OpenAI-compatible base URL — e.g. a local Ollama server at .../v1.
     bool        llmEnabled  = false;
-    std::string llmEndpoint = "http://localhost:11434";
+    std::string llmEndpoint = "http://localhost:11434/v1";
     std::string llmModel    = "llama3.2";
     float       llmConfidenceThreshold = 0.55f;
     int         llmTimeoutMs = 4000;

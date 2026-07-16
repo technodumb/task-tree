@@ -63,7 +63,6 @@ add_executable(tasktree
     src/render/nanovg_gl_impl.cpp
     src/ui/TextInput.cpp
     src/ui/DragController.cpp
-    src/llm/OllamaClassifier.cpp
     src/llm/OpenAiClassifier.cpp)
 target_include_directories(tasktree PRIVATE src)
 target_compile_definitions(tasktree PRIVATE

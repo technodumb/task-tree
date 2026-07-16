@@ -20,7 +20,6 @@
 #include "app/Paths.hpp"
 #include "llm/LlmLog.hpp"
 #include "llm/NullClassifier.hpp"
-#include "llm/OllamaClassifier.hpp"
 #include "llm/OpenAiClassifier.hpp"
 #include "model/Store.hpp"
 #include "platform/PlatformX11.hpp"
@@ -96,8 +95,9 @@ int main() {
     const std::string tasksPath = paths::tasksFile().string();
     store::load(forest, tasksPath); // ok if absent -> empty forest
 
-    // Classifier selection: CEREBRAS_API_KEY env -> Cerebras (cloud, OpenAI-compatible);
-    // else config's Ollama if enabled; else no-op (every task standalone).
+    // Classifier selection (all cloud/local LLMs go through the one OpenAI-compatible
+    // client): CEREBRAS_API_KEY env -> Cerebras; else config's OpenAI-compatible endpoint
+    // if enabled (e.g. a local Ollama at http://localhost:11434/v1); else no-op.
     std::unique_ptr<IClassifier> classifier;
     bool llmActive = false;
     const char* cerebrasKey = std::getenv("CEREBRAS_API_KEY");
@@ -114,10 +114,12 @@ int main() {
                              "connect — install libssl-dev and reconfigure/rebuild.\n");
 #endif
     } else if (cfg.llmEnabled) {
-        classifier = std::make_unique<OllamaClassifier>(cfg.llmEndpoint, cfg.llmModel,
+        // Local / self-hosted OpenAI-compatible server (empty key; Ollama etc. ignore it).
+        classifier = std::make_unique<OpenAiClassifier>(cfg.llmEndpoint, "", cfg.llmModel,
                                                         cfg.llmConfidenceThreshold, cfg.llmTimeoutMs);
         llmActive = true;
-        std::fprintf(stderr, "LLM: Ollama (%s @ %s)\n", cfg.llmModel.c_str(), cfg.llmEndpoint.c_str());
+        std::fprintf(stderr, "LLM: OpenAI-compatible (model %s @ %s)\n",
+                     cfg.llmModel.c_str(), cfg.llmEndpoint.c_str());
     } else {
         classifier = std::make_unique<NullClassifier>();
     }
