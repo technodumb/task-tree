@@ -153,6 +153,9 @@ int main() {
     glfwSetCursorPosCallback(win, [](GLFWwindow* w, double x, double y) {
         appOf(w)->onCursorPos(x, y);
     });
+    glfwSetCursorEnterCallback(win, [](GLFWwindow* w, int entered) {
+        appOf(w)->onCursorEnter(entered != 0);
+    });
     glfwSetScrollCallback(win, [](GLFWwindow* w, double dx, double dy) {
         appOf(w)->onScroll(dx, dy);
     });

@@ -112,7 +112,9 @@ createdAt, doneAt}`; `Forest{nodes, roots[], doneRoots[], nextId}`. Key ops:
   about the cursor. **Double-click empty space** recenters + resets zoom.
 - **Multi-monitor**: `Ctrl+M` moves the overlay to the next monitor.
 - **Search**: `Ctrl+F` opens a search bar; typing live-highlights matching canvas nodes
-  (amber ring, case-insensitive substring); Enter centers the first match; Esc exits.
+  (amber ring, case-insensitive substring). Shortly after typing settles (~0.2 s debounce)
+  the canvas auto-pans to the match nearest the current view centre (least jarring move);
+  Enter jumps to the nearest match immediately; Esc exits.
 - **Path flash**: adding a task briefly highlights root→new-node; the canvas also **pans
   to bring the new node into view**.
 

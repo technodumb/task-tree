@@ -37,6 +37,11 @@ edits/commits as they come. There is no unattended loop and no standing allowlis
 - Tests: `ctest --test-dir build`. Pure logic (model, layout, store, config) is
   dependency-free and unit-tested; extend those with any model/layout change.
 - Dev-only code is gated by `TASKTREE_DEV` (see `src/llm/LlmLog.hpp` for the pattern).
+- **Always restart the running app after modifying it.** Once a build (and any tests)
+  succeed, run `~/.init-scripts/tasktree.sh restart` (aliased `tasktree restart`) so the
+  live instance picks up the new binary and the user can see the change immediately.
+  Do this once per finished set of changes — after the successful build — not after each
+  individual edit. Restart is safe: tasks persist in `tasks.json` across it.
 
 ## Layout of the code
 `src/model` (Task/Forest + JSON store), `src/layout` (pure tidy-tree engine),

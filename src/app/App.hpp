@@ -37,6 +37,7 @@ public:
     void onKey(int key, int action, int mods);
     void onMouseButton(int button, int action, int mods);
     void onCursorPos(double x, double y);
+    void onCursorEnter(bool entered);
     void onScroll(double dx, double dy);
 
     // Called from a classifier worker thread; enqueues a result and wakes the loop.
@@ -94,6 +95,8 @@ private:
     void toggleSearch();
     void exitSearch();
     void updateSearchMatches();
+    TaskId nearestSearchHit(int winW, int winH) const; // match closest to the view centre
+    double searchPanDue_ = 0.0; // debounce: auto-pan to nearest match at this time (0 = none)
 
     std::unordered_map<TaskId, Size> sizes_;
     std::unordered_map<TaskId, Rect> rects_;        // current layout
@@ -108,7 +111,17 @@ private:
     // Canvas view transform (screen = pan + zoom * world). Screen-space UI is unaffected.
     Vec2  pan_;
     float zoom_ = 1.f;
-    TaskId focusNode_ = 0;   // pan to centre this node on the next frame (0 = none)
+    TaskId focusNode_ = 0;   // centre this node on the next frame (0 = none); glides there
+
+    // Smooth camera glide shared by the search auto-pan and the new-node pan: pan_ eases
+    // from panFrom_ to panTo_ over kPanAnimDur (ease-out cubic); the loop wakes ~60fps
+    // meanwhile. Any manual pan/zoom pre-empts it via cancelPanAnim().
+    void  startPanTo(Vec2 target);        // begin a glide (snaps instead if already ~there)
+    void  cancelPanAnim() { panAnimActive_ = false; }
+    bool  panAnimActive_ = false;
+    Vec2  panFrom_, panTo_;
+    double panAnimStart_ = 0.0;
+
     bool  panning_ = false;
     Vec2  panGrab_;     // screen cursor at pan start
     Vec2  panOrigin_;   // pan_ at pan start

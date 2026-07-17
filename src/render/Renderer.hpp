@@ -37,6 +37,7 @@ struct DonePanelLayout {
     Rect  pinButton;          // autohide toggle
     float contentClipTop = 0.f;
     float contentClipBottom = 0.f;
+    int   itemCount = 0;      // total completed tasks (shown as a count badge)
 };
 
 // One visible row in the DONE panel's expandable, indented tree.
@@ -46,6 +47,7 @@ struct DoneRow {
     int    depth = 0;
     bool   hasChildren = false;
     bool   expanded = false;
+    bool   hovered = false;   // cursor is over this row (subtle highlight)
 };
 
 class Renderer {
@@ -81,8 +83,10 @@ public:
                    std::size_t caretByte, bool caretOn, const Config& cfg,
                    bool quickAddMode);
 
-    // The DONE side panel: translucent green tint, "DONE" title, autohide toggle, and
-    // a scissor-clipped, indented, expandable list of done rows (no card borders).
+    // The DONE side panel: a floating rounded card (drop shadow + subtle border, dark
+    // surface with green accents), a header with title + count badge + pin toggle, and a
+    // scissor-clipped, indented, expandable list of done rows (top-level items as cards,
+    // children with indent guides, hover highlight, chevrons/checks).
     void drawDonePanel(const DonePanelLayout& layout, const Forest& f,
                        const std::vector<DoneRow>& rows, const Config& cfg);
 
@@ -95,6 +99,16 @@ private:
     void drawNode(const Rect& r, const std::string& text, const Config& cfg,
                   bool highlight, float alphaMul, TaskId id, int status) const;
     void drawEdge(const Rect& parent, const Rect& child, const Config& cfg) const;
+
+    // Shared chrome for the input + search fields (drop shadow, rounded fill, border).
+    // They are the same component; only the border colour differs.
+    void drawFieldChrome(float bx, float by, float w, float h,
+                         const Config& cfg, const Color& border) const;
+
+    // Blinking text caret: a vertical bar of caretHeight(), centred on centerY at x.
+    void drawCaret(float x, float centerY, const Config& cfg) const;
+    // Caret height, sized between the text glyphs and the field box (used by both fields).
+    float caretHeight() const { return fontSize_ * 1.5f; }
 
     // Reserved top band inside a node for the id badge (so text never overlaps it).
     float idBandHeight() const { return fontSize_ * 0.62f + 12.f; }

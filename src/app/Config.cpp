@@ -58,6 +58,9 @@ Config loadConfig(const std::string& path) {
     c.dropHint     = col("theme.drop_hint", c.dropHint);
     c.quickAddFill = col("theme.quick_add_fill", c.quickAddFill);
     c.donePanelBg   = col("theme.done_panel_bg", c.donePanelBg);
+    c.donePanelBorder= col("theme.done_panel_border", c.donePanelBorder);
+    c.doneRowCard   = col("theme.done_row_card", c.doneRowCard);
+    c.doneRowHover  = col("theme.done_row_hover", c.doneRowHover);
     c.doneCardFill  = col("theme.done_card_fill", c.doneCardFill);
     c.doneCardBorder= col("theme.done_card_border", c.doneCardBorder);
     c.doneText      = col("theme.done_text", c.doneText);
@@ -106,12 +109,15 @@ bool saveConfig(const Config& c, const std::string& path) {
       << "edge            = \"" << colorToHex(c.edgeColor) << "\"\n"
       << "drop_hint       = \"" << colorToHex(c.dropHint) << "\"\n"
       << "quick_add_fill  = \"" << colorToHex(c.quickAddFill) << "\"\n"
-      << "# DONE section (greenish)\n"
-      << "done_panel_bg    = \"" << colorToHex(c.donePanelBg) << "\"\n"
-      << "done_card_fill   = \"" << colorToHex(c.doneCardFill) << "\"\n"
-      << "done_card_border = \"" << colorToHex(c.doneCardBorder) << "\"\n"
-      << "done_text        = \"" << colorToHex(c.doneText) << "\"\n"
-      << "done_title       = \"" << colorToHex(c.doneTitle) << "\"\n\n"
+      << "# DONE section (dark surface, green accent)\n"
+      << "done_panel_bg     = \"" << colorToHex(c.donePanelBg) << "\"\n"
+      << "done_panel_border = \"" << colorToHex(c.donePanelBorder) << "\"\n"
+      << "done_row_card     = \"" << colorToHex(c.doneRowCard) << "\"\n"
+      << "done_row_hover    = \"" << colorToHex(c.doneRowHover) << "\"\n"
+      << "done_card_fill    = \"" << colorToHex(c.doneCardFill) << "\"\n"
+      << "done_card_border  = \"" << colorToHex(c.doneCardBorder) << "\"\n"
+      << "done_text         = \"" << colorToHex(c.doneText) << "\"\n"
+      << "done_title        = \"" << colorToHex(c.doneTitle) << "\"\n\n"
       << "[llm]\n"
       << "# Optional local classifier. When disabled, every new task is standalone.\n"
       << "# To enable: install ollama, `ollama pull " << c.llmModel << "`, set enabled = true.\n"

@@ -257,12 +257,43 @@ void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>&
     nvgRestore(vg_);
 }
 
+void Renderer::drawFieldChrome(float bx, float by, float w, float h,
+                               const Config& cfg, const Color& border) const {
+    const float r = cfg.cornerRadius;
+    // Drop shadow.
+    NVGpaint shadow = nvgBoxGradient(vg_, bx, by + 4, w, h, r * 1.5f, 22.f,
+                                     nvgRGBA(0, 0, 0, 150), nvgRGBA(0, 0, 0, 0));
+    nvgBeginPath(vg_);
+    nvgRect(vg_, bx - 40, by - 40, w + 80, h + 80);
+    nvgRoundedRect(vg_, bx, by, w, h, r);
+    nvgPathWinding(vg_, NVG_HOLE);
+    nvgFillPaint(vg_, shadow);
+    nvgFill(vg_);
+    // Box fill + border (the border colour is the only per-field difference).
+    nvgBeginPath(vg_);
+    nvgRoundedRect(vg_, bx, by, w, h, r);
+    nvgFillColor(vg_, col(cfg.quickAddFill));
+    nvgFill(vg_);
+    nvgStrokeColor(vg_, col(border));
+    nvgStrokeWidth(vg_, 1.5f);
+    nvgStroke(vg_);
+}
+
+void Renderer::drawCaret(float x, float centerY, const Config& cfg) const {
+    const float half = caretHeight() * 0.5f;
+    nvgBeginPath(vg_);
+    nvgMoveTo(vg_, x, centerY - half);
+    nvgLineTo(vg_, x, centerY + half);
+    nvgStrokeColor(vg_, col(cfg.nodeText));
+    nvgStrokeWidth(vg_, 1.4f);
+    nvgStroke(vg_);
+}
+
 void Renderer::drawInput(float screenW, float screenH, const std::string& text,
                          std::size_t caretByte, bool caretOn, const Config& cfg,
                          bool quickAddMode) {
     const float boxW = std::min(620.f, std::max(360.f, screenW * 0.5f));
     const float bx = (screenW - boxW) * 0.5f;
-    const float r = cfg.cornerRadius;
     const float contentW = boxW - 2 * padX_;
     const float pad = padY_;
 
@@ -302,59 +333,39 @@ void Renderer::drawInput(float screenW, float screenH, const std::string& text,
     const int shown = std::min(total, maxLines);
 
     const float boxH = shown * lineH + 2 * pad + 4.f;
-    // Quick-add (Ctrl+Alt+Enter): top anchored -> grows DOWN. Full overlay
-    // (Ctrl+Alt+Space): bottom anchored -> grows UP.
-    const float by = quickAddMode ? (screenH * 0.30f) : (screenH - 40.f - boxH);
+    // Quick-add (Ctrl+Alt+Enter): centred on screen. Full overlay (Ctrl+Alt+Space):
+    // bottom anchored -> grows UP.
+    const float by = quickAddMode ? (screenH - boxH) * 0.5f : (screenH - 40.f - boxH);
 
-    // Drop shadow.
-    NVGpaint shadow = nvgBoxGradient(vg_, bx, by + 4, boxW, boxH, r * 1.5f, 22.f,
-                                     nvgRGBA(0, 0, 0, 150), nvgRGBA(0, 0, 0, 0));
-    nvgBeginPath(vg_);
-    nvgRect(vg_, bx - 40, by - 40, boxW + 80, boxH + 80);
-    nvgRoundedRect(vg_, bx, by, boxW, boxH, r);
-    nvgPathWinding(vg_, NVG_HOLE);
-    nvgFillPaint(vg_, shadow);
-    nvgFill(vg_);
+    // Same chrome as the search field; only the border colour differs (subtle node
+    // border here, amber for search).
+    drawFieldChrome(bx, by, boxW, boxH, cfg, cfg.nodeBorder);
 
-    // Box.
-    nvgBeginPath(vg_);
-    nvgRoundedRect(vg_, bx, by, boxW, boxH, r);
-    nvgFillColor(vg_, col(cfg.quickAddFill));
-    nvgFill(vg_);
-    nvgStrokeColor(vg_, col(cfg.nodeBorder));
-    nvgStrokeWidth(vg_, 1.f);
-    nvgStroke(vg_);
-
-    // Text (or placeholder), top-aligned, one row per wrapped line.
+    // Text (or placeholder): the visible rows form a block centred vertically in the
+    // box (the search field's balanced look), one row per wrapped line.
     const float tx = bx + padX_;
+    const float textTop = by + (boxH - shown * lineH) * 0.5f;
     nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
     if (text.empty()) {
         nvgFillColor(vg_, col(cfg.nodeText, 0.4f));
-        nvgText(vg_, tx, by + pad, "Type a task, press Enter…", nullptr);
+        nvgText(vg_, tx, textTop, "Type a task, press Enter…", nullptr);
     } else {
         nvgFillColor(vg_, col(cfg.nodeText));
-        float ty = by + pad;
-        for (int i = firstRow; i < total; ++i) {
+        float ty = textTop;
+        for (int i = firstRow; i < firstRow + shown; ++i) {
             nvgText(vg_, tx, ty, text.c_str() + rows[i].start, text.c_str() + rows[i].end);
             ty += lineH;
         }
     }
 
-    // Caret on its wrapped line.
+    // Caret on its wrapped line, centred on the row's glyph box (drawCaret sizes it).
     if (caretOn) {
-        const float caretY = by + pad + std::max(0, caretRow - firstRow) * lineH;
+        const float lineTop = textTop + std::max(0, caretRow - firstRow) * lineH;
         float adv = 0.f;
         if (cb > rows[caretRow].start)
             adv = nvgTextBounds(vg_, 0, 0, text.c_str() + rows[caretRow].start,
                                 text.c_str() + cb, nullptr);
-        const float caretX = tx + adv;
-        const float glyphH = asc - desc;   // caret spans the text's glyph height
-        nvgBeginPath(vg_);
-        nvgMoveTo(vg_, caretX, caretY);
-        nvgLineTo(vg_, caretX, caretY + glyphH);
-        nvgStrokeColor(vg_, col(cfg.nodeText));
-        nvgStrokeWidth(vg_, 1.4f);
-        nvgStroke(vg_);
+        drawCaret(tx + adv, lineTop + (asc - desc) * 0.5f, cfg);
     }
 }
 
@@ -364,24 +375,11 @@ void Renderer::drawSearchBar(float screenW, const std::string& query, std::size_
     const float boxH = fontSize_ + 2 * padY_ + 8.f;
     const float bx = (screenW - boxW) * 0.5f;
     const float by = 48.f;                    // top-centre, out of the way of the tree
-    const float r = cfg.cornerRadius;
 
-    NVGpaint shadow = nvgBoxGradient(vg_, bx, by + 4, boxW, boxH, r * 1.5f, 20.f,
-                                     nvgRGBA(0, 0, 0, 140), nvgRGBA(0, 0, 0, 0));
-    nvgBeginPath(vg_);
-    nvgRect(vg_, bx - 40, by - 40, boxW + 80, boxH + 80);
-    nvgRoundedRect(vg_, bx, by, boxW, boxH, r);
-    nvgPathWinding(vg_, NVG_HOLE);
-    nvgFillPaint(vg_, shadow);
-    nvgFill(vg_);
-
-    nvgBeginPath(vg_);
-    nvgRoundedRect(vg_, bx, by, boxW, boxH, r);
-    nvgFillColor(vg_, col(cfg.quickAddFill));
-    nvgFill(vg_);
-    nvgStrokeColor(vg_, nvgRGBA(245, 200, 70, 220));   // amber, matches the node rings
-    nvgStrokeWidth(vg_, 1.5f);
-    nvgStroke(vg_);
+    // Same chrome as the input field; the amber border (matching the node rings) is the
+    // only difference.
+    const Color amber{245 / 255.f, 200 / 255.f, 70 / 255.f, 220 / 255.f};
+    drawFieldChrome(bx, by, boxW, boxH, cfg, amber);
 
     nvgFontFaceId(vg_, font_);
     nvgFontSize(vg_, fontSize_);
@@ -409,13 +407,7 @@ void Renderer::drawSearchBar(float screenW, const std::string& query, std::size_
         const std::string prefix = query.substr(0, std::min(caretByte, query.size()));
         const float adv = prefix.empty() ? 0.f
                         : nvgTextBounds(vg_, 0, 0, prefix.c_str(), end(prefix), nullptr);
-        const float cx = tx + adv;
-        nvgBeginPath(vg_);
-        nvgMoveTo(vg_, cx, by + 6);
-        nvgLineTo(vg_, cx, by + boxH - 6);
-        nvgStrokeColor(vg_, col(cfg.nodeText));
-        nvgStrokeWidth(vg_, 1.4f);
-        nvgStroke(vg_);
+        drawCaret(tx + adv, ty, cfg);   // ty is the text's vertical centre
     }
 }
 
@@ -432,64 +424,154 @@ float Renderer::measureTextHeight(const std::string& text, float width) const {
 void Renderer::drawDonePanel(const DonePanelLayout& L, const Forest& f,
                              const std::vector<DoneRow>& rows, const Config& cfg) {
     const Rect& p = L.panel;
+    const float radius = cfg.cornerRadius;
 
-    // Just a translucent green tint (no border) + a subtle brighter left edge.
+    // Floating card: drop shadow, then the rounded dark surface + subtle green border.
+    NVGpaint shadow = nvgBoxGradient(vg_, p.x, p.y + 5.f, p.w, p.h, radius * 1.4f, 26.f,
+                                     nvgRGBA(0, 0, 0, 140), nvgRGBA(0, 0, 0, 0));
     nvgBeginPath(vg_);
-    nvgRect(vg_, p.x, p.y, p.w, p.h);
+    nvgRect(vg_, p.x - 50.f, p.y - 50.f, p.w + 100.f, p.h + 100.f);
+    nvgRoundedRect(vg_, p.x, p.y, p.w, p.h, radius);
+    nvgPathWinding(vg_, NVG_HOLE);
+    nvgFillPaint(vg_, shadow);
+    nvgFill(vg_);
+
+    nvgBeginPath(vg_);
+    nvgRoundedRect(vg_, p.x, p.y, p.w, p.h, radius);
     nvgFillColor(vg_, col(cfg.donePanelBg));
     nvgFill(vg_);
-    nvgBeginPath(vg_);
-    nvgRect(vg_, p.x, p.y, 2.f, p.h);
-    nvgFillColor(vg_, col(cfg.doneTitle, 0.55f));
-    nvgFill(vg_);
+    nvgStrokeColor(vg_, col(cfg.donePanelBorder));
+    nvgStrokeWidth(vg_, 1.f);
+    nvgStroke(vg_);
 
-    // Title.
+    // Header: "Done" title + a small count pill.
     nvgFontFaceId(vg_, font_);
-    nvgFontSize(vg_, fontSize_ + 6.f);
+    nvgFontSize(vg_, fontSize_ + 3.f);
     nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
     nvgFillColor(vg_, col(cfg.doneTitle));
-    nvgText(vg_, L.titleBar.x + 16.f, L.titleBar.cy(), "DONE", nullptr);
+    const float titleX = L.titleBar.x + 16.f;
+    const float titleY = L.titleBar.cy();
+    nvgText(vg_, titleX, titleY, "Done", nullptr);
+    if (L.itemCount > 0) {
+        float tb[4] = {0, 0, 0, 0};
+        nvgTextBounds(vg_, 0, 0, "Done", nullptr, tb);
+        const std::string cnt = std::to_string(L.itemCount);
+        const float badgeFs = fontSize_ - 5.f;
+        nvgFontSize(vg_, badgeFs);
+        float cb[4] = {0, 0, 0, 0};
+        nvgTextBounds(vg_, 0, 0, cnt.c_str(), nullptr, cb);
+        const float bw = std::max(badgeFs + 8.f, (cb[2] - cb[0]) + 12.f);
+        const float bh = badgeFs + 7.f;
+        const float bx = titleX + (tb[2] - tb[0]) + 10.f;
+        const float by = titleY - bh * 0.5f;
+        nvgBeginPath(vg_);
+        nvgRoundedRect(vg_, bx, by, bw, bh, bh * 0.5f);
+        nvgFillColor(vg_, col(cfg.doneTitle, 0.20f));
+        nvgFill(vg_);
+        nvgTextAlign(vg_, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(vg_, col(cfg.doneTitle));
+        nvgText(vg_, bx + bw * 0.5f, titleY + 0.5f, cnt.c_str(), nullptr);
+    }
 
-    // Autohide toggle button (kept as a small pill so it reads as clickable).
+    // Autohide toggle: filled accent pill when pinned, outlined when not.
     const Rect& b = L.pinButton;
     nvgBeginPath(vg_);
-    nvgRoundedRect(vg_, b.x, b.y, b.w, b.h, 6.f);
-    nvgFillColor(vg_, col(cfg.doneCardFill, L.pinned ? 0.95f : 0.4f));
-    nvgFill(vg_);
-    nvgFontSize(vg_, fontSize_ - 5.f);
+    nvgRoundedRect(vg_, b.x, b.y, b.w, b.h, b.h * 0.5f);
+    if (L.pinned) {
+        nvgFillColor(vg_, col(cfg.doneCardFill));
+        nvgFill(vg_);
+    } else {
+        nvgStrokeColor(vg_, col(cfg.doneTitle, 0.55f));
+        nvgStrokeWidth(vg_, 1.f);
+        nvgStroke(vg_);
+    }
+    nvgFontSize(vg_, fontSize_ - 6.f);
     nvgTextAlign(vg_, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-    nvgFillColor(vg_, col(cfg.doneText));
-    nvgText(vg_, b.cx(), b.cy(), L.pinned ? "PINNED" : "PIN", nullptr);
+    nvgFillColor(vg_, col(L.pinned ? cfg.doneText : cfg.doneTitle, L.pinned ? 1.f : 0.85f));
+    nvgText(vg_, b.cx(), b.cy() + 0.5f, L.pinned ? "PINNED" : "PIN", nullptr);
 
-    // Rows: chevron (if it has children) + indented text. No boxes, no borders.
+    // Divider under the header.
+    nvgBeginPath(vg_);
+    nvgRect(vg_, p.x + 14.f, L.contentClipTop - 0.5f, p.w - 28.f, 1.f);
+    nvgFillColor(vg_, col(cfg.donePanelBorder));
+    nvgFill(vg_);
+
+    if (rows.empty()) {
+        nvgFontFaceId(vg_, font_);
+        nvgFontSize(vg_, fontSize_ - 1.f);
+        nvgTextAlign(vg_, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(vg_, col(cfg.doneText, 0.4f));
+        nvgText(vg_, p.cx(), (L.contentClipTop + L.contentClipBottom) * 0.5f,
+                "Double-click a task to complete it", nullptr);
+        return;
+    }
+
+    // Rows: top-level items sit on a subtle card; children are indented with a guide
+    // line. Hovered row gets a faint highlight. Chevron if expandable, else a check.
     nvgSave(vg_);
     nvgScissor(vg_, p.x, L.contentClipTop, p.w, L.contentClipBottom - L.contentClipTop);
+    const float bandX = p.x + 8.f, bandW = p.w - 16.f;
     for (const DoneRow& row : rows) {
         const Task* t = f.get(row.id);
         if (!t) continue;
         const Rect& r = row.rect;
-        const float chevX = r.x + 3.f;
-        const float cy = r.y + 12.f;
+
+        // Card behind top-level items; hover highlight on any row.
+        if (row.depth == 0) {
+            nvgBeginPath(vg_);
+            nvgRoundedRect(vg_, bandX, r.y, bandW, r.h, 9.f);
+            nvgFillColor(vg_, col(cfg.doneRowCard));
+            nvgFill(vg_);
+        }
+        if (row.hovered) {
+            nvgBeginPath(vg_);
+            nvgRoundedRect(vg_, bandX, r.y, bandW, r.h, 9.f);
+            nvgFillColor(vg_, col(cfg.doneRowHover));
+            nvgFill(vg_);
+        }
+
+        // Indent guide for nested items.
+        if (row.depth > 0) {
+            const float gx = r.x - 9.f;
+            nvgBeginPath(vg_);
+            nvgRect(vg_, gx, r.y + 3.f, 1.f, r.h - 6.f);
+            nvgFillColor(vg_, col(cfg.doneCardBorder, 0.22f));
+            nvgFill(vg_);
+        }
+
+        const float glyphX = r.x + 3.f;
+        const float cy = r.y + 20.f;   // aligned with the first text line
         if (row.hasChildren) {
             nvgBeginPath(vg_);
             if (row.expanded) { // down-pointing
-                nvgMoveTo(vg_, chevX, cy - 3.f);
-                nvgLineTo(vg_, chevX + 8.f, cy - 3.f);
-                nvgLineTo(vg_, chevX + 4.f, cy + 3.f);
+                nvgMoveTo(vg_, glyphX, cy - 3.f);
+                nvgLineTo(vg_, glyphX + 8.f, cy - 3.f);
+                nvgLineTo(vg_, glyphX + 4.f, cy + 3.f);
             } else {            // right-pointing
-                nvgMoveTo(vg_, chevX, cy - 4.f);
-                nvgLineTo(vg_, chevX + 6.f, cy);
-                nvgLineTo(vg_, chevX, cy + 4.f);
+                nvgMoveTo(vg_, glyphX, cy - 4.f);
+                nvgLineTo(vg_, glyphX + 6.f, cy);
+                nvgLineTo(vg_, glyphX, cy + 4.f);
             }
             nvgFillColor(vg_, col(cfg.doneTitle));
             nvgFill(vg_);
+        } else {                // leaf: a small check mark reinforces "completed"
+            nvgBeginPath(vg_);
+            nvgMoveTo(vg_, glyphX, cy);
+            nvgLineTo(vg_, glyphX + 3.f, cy + 3.f);
+            nvgLineTo(vg_, glyphX + 8.f, cy - 4.f);
+            nvgStrokeColor(vg_, col(cfg.doneTitle, 0.8f));
+            nvgStrokeWidth(vg_, 1.6f);
+            nvgLineCap(vg_, NVG_ROUND);
+            nvgLineJoin(vg_, NVG_ROUND);
+            nvgStroke(vg_);
         }
-        const float textX = r.x + 16.f;
+
+        const float textX = r.x + 18.f;
         nvgFontFaceId(vg_, font_);
         nvgFontSize(vg_, fontSize_);
         nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
-        nvgFillColor(vg_, col(cfg.doneText, row.depth == 0 ? 1.f : 0.85f));
-        nvgTextBox(vg_, textX, r.y + 6.f, std::max(20.f, r.right() - textX - 8.f),
+        nvgFillColor(vg_, col(cfg.doneText, row.depth == 0 ? 1.f : 0.8f));
+        nvgTextBox(vg_, textX, r.y + 11.f, std::max(20.f, r.right() - textX - 2.f),
                    t->text.c_str(), end(t->text));
     }
     nvgRestore(vg_);

@@ -41,12 +41,17 @@ struct Config {
     Color dropHint    {0.40f, 0.80f, 0.55f, 0.95f}; // preview edge / gap cue
     Color quickAddFill{0.14f, 0.16f, 0.20f, 0.98f};
 
-    // DONE section (greenish, translucent tint — no card borders)
-    Color donePanelBg  {0.05f, 0.15f, 0.09f, 0.55f};
-    Color doneCardFill {0.15f, 0.32f, 0.20f, 0.90f}; // used only for the PIN button
-    Color doneCardBorder{0.28f, 0.68f, 0.44f, 1.f};  // used only for the PIN button
-    Color doneText     {0.86f, 0.97f, 0.89f, 1.f};
-    Color doneTitle    {0.55f, 0.94f, 0.68f, 1.f};
+    // DONE section — neutral dark blue-grey surfaces matching the rest of the UI, with
+    // green kept only as the "done" accent (title, count badge, chevrons, checks). Drawn
+    // as a floating rounded card.
+    Color donePanelBg  {0.11f, 0.13f, 0.17f, 1.0f};  // solid dark surface (node-fill family)
+    Color donePanelBorder{0.45f, 0.55f, 0.72f, 0.22f}; // subtle edge (matches node borders)
+    Color doneRowCard  {0.17f, 0.19f, 0.28f, 0.60f}; // subtle card behind top-level items
+    Color doneRowHover {0.36f, 0.42f, 0.66f, 0.22f}; // row highlight under the cursor
+    Color doneCardFill {0.16f, 0.40f, 0.26f, 0.95f}; // PIN button (pinned) fill
+    Color doneCardBorder{0.30f, 0.72f, 0.48f, 1.f};  // PIN button + indent guides accent
+    Color doneText     {0.92f, 0.94f, 0.98f, 1.f};   // neutral near-white (node-text family)
+    Color doneTitle    {0.56f, 0.92f, 0.70f, 1.f};   // green accent
 
     // local / self-hosted LLM classifier (disabled by default). Endpoint is an
     // OpenAI-compatible base URL — e.g. a local Ollama server at .../v1.
