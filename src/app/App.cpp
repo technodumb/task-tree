@@ -96,6 +96,11 @@ void App::onKey(int key, int action, int mods) {
         }
         if (key == GLFW_KEY_M) { moveOverlayToNextMonitor(); return; }        // next monitor
         if (key == GLFW_KEY_F && mode_ == Mode::Full) { toggleSearch(); return; } // find
+        if (mode_ == Mode::Full && key == GLFW_KEY_Z) {   // undo / redo
+            if (mods & GLFW_MOD_SHIFT) redo(); else undo();
+            return;
+        }
+        if (mode_ == Mode::Full && key == GLFW_KEY_Y) { redo(); return; }
     }
 
     if (searching_) {
@@ -173,7 +178,7 @@ void App::onMouseButton(int button, int action, int mods) {
     if (button == GLFW_MOUSE_BUTTON_RIGHT) {
         if (action == GLFW_PRESS && !pointInPanel(mouse_)) {
             const TaskId id = hitTest(worldMouse());
-            if (Task* t = forest_.get(id)) { t->status = (t->status + 1) % 3; save(); }
+            if (Task* t = forest_.get(id)) { history_.snapshot(forest_); t->status = (t->status + 1) % 3; save(); }
         }
         return;
     }
@@ -221,7 +226,10 @@ void App::onMouseButton(int button, int action, int mods) {
         }
     } else if (action == GLFW_RELEASE) {
         if (panning_) { panning_ = false; return; }
-        if (drag_.active() && drag_.drop(forest_)) { forceRelayout(); save(); }
+        if (drag_.active()) {
+            Forest before = forest_;   // snapshot only if the drop actually reparents
+            if (drag_.drop(forest_)) { history_.record(std::move(before)); forceRelayout(); save(); }
+        }
     }
 }
 
@@ -308,6 +316,7 @@ void App::commitInput() {
     const std::string txt = trim(input_.text());
     if (txt.empty()) { if (mode_ == Mode::QuickAdd) hide(); return; }
 
+    history_.snapshot(forest_);   // undo checkpoint before the add
     TaskId id;
     if (isDevTask(txt)) {
         // Dev fast path: TaskTree's own to-dos ("ttd> ...") park directly under the
@@ -378,6 +387,8 @@ void App::applyPendingClassifications() {
         std::lock_guard<std::mutex> lock(pendingMutex_);
         local.swap(pending_);
     }
+    if (local.empty()) return;
+    Forest before = forest_;   // pre-batch undo checkpoint (recorded only if something moves)
     const bool L = llmlog::enabled();
     auto textOf = [&](TaskId t) {
         const Task* n = forest_.get(t);
@@ -424,7 +435,10 @@ void App::applyPendingClassifications() {
                           std::to_string(id) + " target=" + std::to_string(r.targetId));
         }
     }
-    if (changed) { forceRelayout(); save(); flashPath(flashLeaf); focusNode_ = flashLeaf; }
+    if (changed) {
+        history_.record(std::move(before));
+        forceRelayout(); save(); flashPath(flashLeaf); focusNode_ = flashLeaf;
+    }
 }
 
 // ---- layout + render -------------------------------------------------------
@@ -637,16 +651,22 @@ TaskId App::hitTestDone(Vec2 p) const {
 void App::handleDoubleClick() {
     if (pointInPanel(mouse_)) {
         const TaskId id = hitTestDone(mouse_);
-        if (id != 0 && forest_.restoreFromDone(id)) {
-            doneExpanded_.erase(id);
-            forceRelayout();
-            save();
+        if (id != 0) {
+            Forest before = forest_;
+            if (forest_.restoreFromDone(id)) {
+                history_.record(std::move(before));
+                doneExpanded_.erase(id);
+                forceRelayout();
+                save();
+            }
         }
     } else {
         const TaskId id = hitTest(worldMouse());
         if (id != 0) {
             if (drag_.active()) drag_.cancel();
+            Forest before = forest_;
             if (forest_.markDone(id)) {
+                history_.record(std::move(before));
                 if (Task* t = forest_.get(id)) t->doneAt = nowMs();  // record done date
                 forceRelayout();
                 save();
@@ -680,5 +700,23 @@ double App::desiredTimeout() const {
 }
 
 void App::save() { store::save(forest_, tasksPath_); }
+
+void App::undo() {
+    if (!history_.undo(forest_)) return;
+    drag_.cancel();
+    focusNode_ = 0;
+    forceRelayout();
+    if (searching_) updateSearchMatches();  // hit set may reference now-removed/added nodes
+    save();
+}
+
+void App::redo() {
+    if (!history_.redo(forest_)) return;
+    drag_.cancel();
+    focusNode_ = 0;
+    forceRelayout();
+    if (searching_) updateSearchMatches();
+    save();
+}
 
 } // namespace tt

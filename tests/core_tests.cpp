@@ -3,6 +3,7 @@
 //   g++ -std=c++17 -I ../src core_tests.cpp ../src/model/Forest.cpp ../src/layout/TidyLayout.cpp
 #include "app/DevRoute.hpp"
 #include "layout/TidyLayout.hpp"
+#include "model/History.hpp"
 #include "model/Task.hpp"
 
 #include <algorithm>
@@ -202,6 +203,49 @@ int main() {
         h.markDone(doneDev);
         const TaskId freshDev = ensureDevRoot(h, 0);
         CHECK(freshDev != doneDev, "does not resurrect a DONE dev node; makes a fresh one");
+    }
+
+    { // undo/redo history over Forest snapshots
+        Forest f;
+        TaskId a = f.addTask("a");
+        History h;
+        CHECK(!h.canUndo() && !h.canRedo(), "history starts empty");
+        CHECK(!h.undo(f), "undo on empty history is a no-op");
+
+        h.snapshot(f);                 // checkpoint {a}
+        TaskId b = f.addTask("b", a);  // {a, a>b}
+        CHECK(h.canUndo(), "can undo after a snapshot");
+        CHECK(h.undo(f), "undo succeeds");
+        CHECK(!f.exists(b) && f.size() == 1, "undo restored the single-node state");
+        CHECK(h.canRedo() && h.redo(f), "redo succeeds");
+        CHECK(f.exists(b) && f.size() == 2, "redo re-added b");
+        CHECK(!h.canRedo(), "redo stack emptied by the redo");
+
+        // A fresh edit forks history: the redo future is dropped.
+        h.snapshot(f);
+        f.addTask("c");
+        CHECK(h.undo(f), "undo the c add");
+        CHECK(h.canRedo(), "c is redoable");
+        h.snapshot(f);
+        f.addTask("d");
+        CHECK(!h.canRedo(), "a new edit cleared the redo future");
+
+        // nextId is part of the snapshot, so undo must not cause id reuse.
+        Forest g;
+        History hg;
+        hg.snapshot(g);
+        TaskId g1 = g.addTask("one");
+        CHECK(hg.undo(g), "undo the add");
+        TaskId g2 = g.addTask("two");
+        CHECK(g2 != g1, "ids not reused after undo (nextId snapshotted)");
+
+        // Bounded depth: only the last `maxDepth` checkpoints are retained.
+        Forest k;
+        History hk(2);
+        for (int i = 0; i < 5; ++i) { hk.snapshot(k); k.addTask("x"); }
+        int undos = 0;
+        while (hk.undo(k)) ++undos;
+        CHECK(undos == 2, "history depth bounded to 2");
     }
 
     std::printf("\n%d checks, %d failures\n", g_checks, g_fail);

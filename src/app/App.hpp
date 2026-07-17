@@ -14,6 +14,7 @@
 #include "layout/Geometry.hpp"
 #include "layout/TidyLayout.hpp"
 #include "llm/IClassifier.hpp"
+#include "model/History.hpp"
 #include "model/Task.hpp"
 #include "platform/IPlatform.hpp"
 #include "render/Renderer.hpp"
@@ -60,6 +61,8 @@ private:
     // outline for the classifier.
     std::string buildTreeOutline(TaskId exclude) const;
     void save();
+    void undo();   // Ctrl+Z: restore the previous forest state
+    void redo();   // Ctrl+Shift+Z / Ctrl+Y: reapply an undone state
     TaskId hitTest(Vec2 p) const;
     bool caretOn() const;
     DragVisual buildDragVisual();
@@ -87,6 +90,7 @@ private:
     TextInput input_;
     DragController drag_;
     LayoutParams params_;
+    History history_;   // undo/redo snapshots of forest_
 
     // Search (Ctrl+F in the full overlay): live-highlight matching canvas nodes.
     bool searching_ = false;
