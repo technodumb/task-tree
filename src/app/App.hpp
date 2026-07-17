@@ -65,6 +65,11 @@ private:
     void redo();   // Ctrl+Shift+Z / Ctrl+Y: reapply an undone state
     void afterHistoryChange();  // shared relayout/cleanup after an undo or redo
     void deleteSelected();      // Delete/Backspace: remove the selected subtree (undoable)
+    // In-place text editing: the input bar is reused to edit an existing node's text.
+    // editingNode_ != 0 routes a commit to update that node instead of adding a task.
+    void startEditing(TaskId id);          // seed the input bar with the node's text
+    void commitEdit(const std::string& txt); // apply the edit (or cancel if empty/unchanged)
+    void cancelEditing();                  // Esc: abandon the edit, leave the node as-is
     TaskId hitTest(Vec2 p) const;
     bool caretOn() const;
     DragVisual buildDragVisual();
@@ -110,6 +115,7 @@ private:
     Vec2 mouse_;
     bool needsRelayout_ = true;
     TaskId selected_ = 0;   // click-selected canvas node (0 = none); drawn with a ring
+    TaskId editingNode_ = 0; // node whose text the input bar is editing (0 = adding, not editing)
 
     // Transient "path to the new task" flash (root -> leaf), fades over ~1.6 s.
     std::unordered_set<TaskId> highlightSet_;

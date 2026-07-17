@@ -81,7 +81,7 @@ public:
     // otherwise a bar at the bottom of the overlay.
     void drawInput(float screenW, float screenH, const std::string& text,
                    std::size_t caretByte, bool caretOn, const Config& cfg,
-                   bool quickAddMode);
+                   bool quickAddMode, bool editing = false);
 
     // The DONE side panel: a floating rounded card (drop shadow + subtle border, dark
     // surface with green accents), a header with title + count badge + pin toggle, and a

@@ -13,6 +13,7 @@ public:
     enum class Action { None, Submit, Cancel };
 
     void clear() { text_.clear(); caret_ = 0; }
+    void setText(const std::string& s) { text_ = s; caret_ = s.size(); } // seed + caret to end
     bool focused() const { return focused_; }
     void setFocused(bool f) { focused_ = f; }
 

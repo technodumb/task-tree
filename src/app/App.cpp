@@ -49,6 +49,7 @@ void App::toggleOverlay() {
     } else {
         mode_ = Mode::Full;
         input_.clear();
+        editingNode_ = 0;
         input_.setFocused(true);
         platform_.showOverlay();
     }
@@ -57,6 +58,7 @@ void App::toggleOverlay() {
 void App::showQuickAdd() {
     mode_ = Mode::QuickAdd;
     input_.clear();
+    editingNode_ = 0;
     input_.setFocused(true);
     platform_.showOverlay();
 }
@@ -65,6 +67,8 @@ void App::hide() {
     mode_ = Mode::Hidden;
     input_.setFocused(false);
     input_.clear();
+    editingNode_ = 0;
+    selected_ = 0;
     drag_.cancel();
     cancelPanAnim();
     exitSearch();
@@ -83,11 +87,18 @@ void App::onKey(int key, int action, int mods) {
     if (action == GLFW_RELEASE || mode_ == Mode::Hidden) return;
 
     if (key == GLFW_KEY_ESCAPE && drag_.active()) { drag_.cancel(); return; }
+    if (key == GLFW_KEY_ESCAPE && editingNode_ != 0) { cancelEditing(); return; }
     // Esc clears a selection first (only when it isn't needed for the field): so a
     // selected node can be dismissed without also closing the overlay.
     if (key == GLFW_KEY_ESCAPE && selected_ != 0 && !searching_ && input_.text().empty()) {
         selected_ = 0;
         return;
+    }
+    // F2, or Enter on a selected node with an empty input bar, edits that node's text.
+    if (!searching_ && editingNode_ == 0 && selected_ != 0 && forest_.exists(selected_)) {
+        const bool enterEmpty = (key == GLFW_KEY_ENTER || key == GLFW_KEY_KP_ENTER) &&
+                                input_.text().empty();
+        if (key == GLFW_KEY_F2 || enterEmpty) { startEditing(selected_); return; }
     }
 
     TextInput& field = searching_ ? search_ : input_;
@@ -124,7 +135,7 @@ void App::onKey(int key, int action, int mods) {
     // Delete / Backspace removes the selected subtree — but only when the input bar is
     // empty (otherwise those keys edit the text being typed). Undo-backed, so no confirm.
     if ((key == GLFW_KEY_DELETE || key == GLFW_KEY_BACKSPACE) &&
-        selected_ != 0 && input_.text().empty()) {
+        selected_ != 0 && editingNode_ == 0 && input_.text().empty()) {
         deleteSelected();
         return;
     }
@@ -186,6 +197,10 @@ TaskId App::nearestSearchHit(int winW, int winH) const {
 
 void App::onMouseButton(int button, int action, int mods) {
     if (mode_ != Mode::Full) return;
+
+    // Clicking anywhere while editing commits the pending text edit first, then the click
+    // is handled normally (select another node, pan, etc.).
+    if (editingNode_ != 0 && action == GLFW_PRESS) commitEdit(trim(input_.text()));
 
     // Right-click a canvas node to cycle its status colour: default -> yellow
     // (in progress) -> orange (priority) -> default.
@@ -330,6 +345,8 @@ void App::moveOverlayToNextMonitor() {
 // ---- task creation + classification ----------------------------------------
 
 void App::commitInput() {
+    if (editingNode_ != 0) { commitEdit(trim(input_.text())); return; }
+
     const std::string txt = trim(input_.text());
     if (txt.empty()) { if (mode_ == Mode::QuickAdd) hide(); return; }
 
@@ -554,7 +571,8 @@ void App::drawScene(int winW, int winH, float dpr) {
             renderer_.drawSearchBar(winW, search_.text(), search_.caret(), caretOn(),
                                     (int)searchHits_.size(), cfg_);
         else
-            renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(), cfg_, false);
+            renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(), cfg_, false,
+                                editingNode_ != 0);
     } else if (mode_ == Mode::QuickAdd) {
         renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(), cfg_, true);
     }
@@ -727,6 +745,33 @@ void App::undo() {
 void App::redo() {
     if (!history_.redo(forest_)) return;
     afterHistoryChange();
+}
+
+void App::startEditing(TaskId id) {
+    const Task* t = forest_.get(id);
+    if (!t) return;
+    editingNode_ = id;
+    selected_ = id;
+    input_.setText(t->text);   // seed with current text, caret at end
+    input_.setFocused(true);
+}
+
+void App::commitEdit(const std::string& txt) {
+    const TaskId id = editingNode_;
+    editingNode_ = 0;
+    input_.clear();
+    Task* t = forest_.get(id);
+    if (!t) return;
+    if (txt.empty() || txt == t->text) return;  // empty or unchanged -> leave the node as-is
+    history_.snapshot(forest_);                  // undo checkpoint before the text change
+    t->text = txt;
+    forceRelayout();  // text changed -> re-measure box + relayout
+    save();
+}
+
+void App::cancelEditing() {
+    editingNode_ = 0;
+    input_.clear();  // node text untouched; selection stays
 }
 
 void App::deleteSelected() {

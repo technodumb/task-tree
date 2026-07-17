@@ -305,7 +305,7 @@ void Renderer::drawCaret(float x, float centerY, const Config& cfg) const {
 
 void Renderer::drawInput(float screenW, float screenH, const std::string& text,
                          std::size_t caretByte, bool caretOn, const Config& cfg,
-                         bool quickAddMode) {
+                         bool quickAddMode, bool editing) {
     const float boxW = std::min(620.f, std::max(360.f, screenW * 0.5f));
     const float bx = (screenW - boxW) * 0.5f;
     const float contentW = boxW - 2 * padX_;
@@ -352,8 +352,9 @@ void Renderer::drawInput(float screenW, float screenH, const std::string& text,
     const float by = quickAddMode ? (screenH - boxH) * 0.5f : (screenH - 40.f - boxH);
 
     // Same chrome as the search field; only the border colour differs (subtle node
-    // border here, amber for search).
-    drawFieldChrome(bx, by, boxW, boxH, cfg, cfg.nodeBorder);
+    // border when adding, selection-blue when editing an existing node, amber for search).
+    const Color editBorder{120 / 255.f, 175 / 255.f, 255 / 255.f, 1.f};
+    drawFieldChrome(bx, by, boxW, boxH, cfg, editing ? editBorder : cfg.nodeBorder);
 
     // Text (or placeholder): the visible rows form a block centred vertically in the
     // box (the search field's balanced look), one row per wrapped line.
@@ -362,7 +363,9 @@ void Renderer::drawInput(float screenW, float screenH, const std::string& text,
     nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
     if (text.empty()) {
         nvgFillColor(vg_, col(cfg.nodeText, 0.4f));
-        nvgText(vg_, tx, textTop, "Type a task, press Enter…", nullptr);
+        nvgText(vg_, tx, textTop,
+                editing ? "Edit text — Enter to save, Esc to cancel" : "Type a task, press Enter…",
+                nullptr);
     } else {
         nvgFillColor(vg_, col(cfg.nodeText));
         float ty = textTop;
