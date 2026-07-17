@@ -162,7 +162,7 @@ void Renderer::drawNode(const Rect& r, const std::string& text, const Config& cf
 void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>& rects,
                         const Config& cfg, const DragVisual& dv, Vec2 pan, float zoom,
                         const std::unordered_set<TaskId>& pathHi, float pathStrength,
-                        const std::unordered_set<TaskId>& searchHits) {
+                        const std::unordered_set<TaskId>& searchHits, TaskId selected) {
     nvgSave(vg_);
     nvgTranslate(vg_, pan.x, pan.y);  // screen = pan + zoom * world
     nvgScale(vg_, zoom, zoom);
@@ -251,6 +251,20 @@ void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>&
             nvgRoundedRect(vg_, r->x - 3.f, r->y - 3.f, r->w + 6.f, r->h + 6.f, cfg.cornerRadius + 3.f);
             nvgStrokeColor(vg_, nvgRGBA(245, 200, 70, 255));
             nvgStrokeWidth(vg_, 3.f);
+            nvgStroke(vg_);
+        }
+    }
+
+    // Selection ring: the click-selected node, a distinct blue so it reads apart from the
+    // amber search ring and the green path flash. Drawn slightly outside the search ring
+    // so both can show at once. Skipped while the selected node is being dragged (it's the
+    // ghost then).
+    if (selected != 0 && !(dv.active && selected == dv.dragged)) {
+        if (const Rect* r = rectOf(selected)) {
+            nvgBeginPath(vg_);
+            nvgRoundedRect(vg_, r->x - 5.f, r->y - 5.f, r->w + 10.f, r->h + 10.f, cfg.cornerRadius + 5.f);
+            nvgStrokeColor(vg_, nvgRGBA(120, 175, 255, 255));
+            nvgStrokeWidth(vg_, 2.5f);
             nvgStroke(vg_);
         }
     }

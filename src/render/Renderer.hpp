@@ -71,7 +71,7 @@ public:
     void drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>& rects,
                   const Config& cfg, const DragVisual& dv, Vec2 pan, float zoom,
                   const std::unordered_set<TaskId>& pathHi, float pathStrength,
-                  const std::unordered_set<TaskId>& searchHits);
+                  const std::unordered_set<TaskId>& searchHits, TaskId selected = 0);
 
     // Search bar (top-centre) shown while Ctrl+F search is active.
     void drawSearchBar(float screenW, const std::string& query, std::size_t caretByte,

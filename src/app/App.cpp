@@ -83,6 +83,12 @@ void App::onKey(int key, int action, int mods) {
     if (action == GLFW_RELEASE || mode_ == Mode::Hidden) return;
 
     if (key == GLFW_KEY_ESCAPE && drag_.active()) { drag_.cancel(); return; }
+    // Esc clears a selection first (only when it isn't needed for the field): so a
+    // selected node can be dismissed without also closing the overlay.
+    if (key == GLFW_KEY_ESCAPE && selected_ != 0 && !searching_ && input_.text().empty()) {
+        selected_ = 0;
+        return;
+    }
 
     TextInput& field = searching_ ? search_ : input_;
 
@@ -221,14 +227,17 @@ void App::onMouseButton(int button, int action, int mods) {
                 if (it != rects_.end()) { cancelPanAnim(); drag_.begin(id, worldMouse(), it->second); }
             } else {
                 cancelPanAnim();
+                selected_ = 0;   // pressing empty canvas clears the selection
                 panning_ = true; panGrab_ = mouse_; panOrigin_ = pan_; // drag empty bg to pan
             }
         }
     } else if (action == GLFW_RELEASE) {
         if (panning_) { panning_ = false; return; }
         if (drag_.active()) {
+            const TaskId node = drag_.dragged();
             Forest before = forest_;   // snapshot only if the drop actually reparents
             if (drag_.drop(forest_)) { history_.record(std::move(before)); forceRelayout(); save(); }
+            selected_ = node;          // clicking (or dragging) a node selects it
         }
     }
 }
@@ -529,7 +538,8 @@ void App::drawScene(int winW, int winH, float dpr) {
             if (now < highlightUntil_) hi = static_cast<float>((highlightUntil_ - now) / kFlashDuration);
             else highlightSet_.clear();
         }
-        renderer_.drawTree(forest_, drawRects, cfg_, dv, pan_, zoom_, highlightSet_, hi, searchHits_);
+        renderer_.drawTree(forest_, drawRects, cfg_, dv, pan_, zoom_, highlightSet_, hi, searchHits_,
+                           selected_);
         if (donePanel_.visible)
             renderer_.drawDonePanel(donePanel_, forest_, doneRows_, cfg_);
         if (searching_)
@@ -703,19 +713,20 @@ void App::save() { store::save(forest_, tasksPath_); }
 
 void App::undo() {
     if (!history_.undo(forest_)) return;
-    drag_.cancel();
-    focusNode_ = 0;
-    forceRelayout();
-    if (searching_) updateSearchMatches();  // hit set may reference now-removed/added nodes
-    save();
+    afterHistoryChange();
 }
 
 void App::redo() {
     if (!history_.redo(forest_)) return;
+    afterHistoryChange();
+}
+
+void App::afterHistoryChange() {
     drag_.cancel();
     focusNode_ = 0;
+    if (!forest_.exists(selected_)) selected_ = 0;  // don't keep a ring on a vanished node
     forceRelayout();
-    if (searching_) updateSearchMatches();
+    if (searching_) updateSearchMatches();  // hit set may reference now-removed/added nodes
     save();
 }
 

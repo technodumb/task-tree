@@ -63,6 +63,7 @@ private:
     void save();
     void undo();   // Ctrl+Z: restore the previous forest state
     void redo();   // Ctrl+Shift+Z / Ctrl+Y: reapply an undone state
+    void afterHistoryChange();  // shared relayout/cleanup after an undo or redo
     TaskId hitTest(Vec2 p) const;
     bool caretOn() const;
     DragVisual buildDragVisual();
@@ -107,6 +108,7 @@ private:
     std::unordered_map<TaskId, Rect> previewRects_; // layout during a drag
     Vec2 mouse_;
     bool needsRelayout_ = true;
+    TaskId selected_ = 0;   // click-selected canvas node (0 = none); drawn with a ring
 
     // Transient "path to the new task" flash (root -> leaf), fades over ~1.6 s.
     std::unordered_set<TaskId> highlightSet_;
