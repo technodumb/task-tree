@@ -27,8 +27,9 @@ changes stay in the pure, unit-tested core.
   the selected node: the input bar is seeded with its text and commit updates the node
   instead of adding a new task; re-measures + relayouts.
 - **Collapse / expand subtrees.** A per-node `collapsed` flag (persisted). Layout treats a
-  collapsed node as a leaf (subtree hidden, no overlap); a chevron affordance on nodes with
-  children toggles it, with a small "+N" badge showing hidden descendant count.
+  collapsed node as a leaf (subtree hidden, no overlap); a small disc handle on the bottom
+  edge of any node with children toggles it — a minus sign when expanded, the hidden-
+  descendant count when collapsed. View-only (no undo entry) but round-tripped in the store.
 
 ---
 

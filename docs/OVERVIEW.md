@@ -62,10 +62,12 @@ The **pure layers** (`model/`, `layout/`) have zero external deps and are unit-t
 (`tests/`), so they're stack-agnostic and fast to reason about. `App` is the orchestrator
 that ties model → layout → render and routes input.
 
-**Data model** (`model/Task.hpp`): `Task{id, parent, text, children[], done, status,
-createdAt, doneAt}`; `Forest{nodes, roots[], doneRoots[], nextId}`. Key ops:
+**Data model** (`model/Task.hpp`): `Task{id, parent, text, children[], done, collapsed,
+status, createdAt, doneAt}`; `Forest{nodes, roots[], doneRoots[], nextId}`. Key ops:
 `addTask`, `reparent` (with cycle prevention), `markDone`/`restoreFromDone`,
 `isInDoneSection`, `removeSubtree`. Sibling order = children-vector order = layout order.
+Undo/redo is a separate pure `model/History` — a bounded stack of whole-`Forest`
+snapshots, so any mutation is reversible without per-op inverse logic (v2).
 
 ---
 
@@ -117,6 +119,23 @@ createdAt, doneAt}`; `Forest{nodes, roots[], doneRoots[], nextId}`. Key ops:
   Enter jumps to the nearest match immediately; Esc exits.
 - **Path flash**: adding a task briefly highlights root→new-node; the canvas also **pans
   to bring the new node into view**.
+
+**Direct manipulation & history** (v2 — theme: editable in place, every edit reversible)
+- **Select**: a left click that doesn't cross the drag threshold selects a canvas node
+  (blue selection ring); `Esc` or an empty-canvas click clears it. The handle the id
+  badge always hinted at, and the base for edit + delete.
+- **Edit node text**: `F2` (or `Enter` on a selected node with the input bar empty) seeds
+  the input bar with the node's text (blue border cue); commit updates the node in place
+  and re-measures/relayouts instead of adding a new task.
+- **Delete subtree**: `Delete` / `Backspace` with a node selected and the input bar empty
+  removes that subtree. No confirm dialog — undo covers it.
+- **Undo / redo**: `Ctrl+Z` / `Ctrl+Shift+Z` (also `Ctrl+Y`) step through the `History`
+  snapshot stack. Every structural mutation snapshots first; the input bar ignores these
+  chords so there's no collision.
+- **Collapse / expand**: nodes with children show a small disc handle on the bottom edge —
+  a minus when expanded, the hidden-descendant count when collapsed. Clicking it toggles
+  the node's `collapsed` flag; layout then treats it as a leaf (subtree hidden, no
+  overlap). View-only (no undo entry) but persisted in `tasks.json`.
 
 **DONE panel** (right edge)
 - Autohides: reveals when the cursor is within the right ~15%, hides when it moves ~17%
@@ -202,6 +221,7 @@ for the off case (see `LlmLog.hpp`).
 - `CLAUDE.md` — session-start behavior + the **ttd** self-development workflow (how agents
   pick up `ttd>` tasks and file them to `ttd ✓ done`).
 - `docs/AGENTS.md` — the iterative one-version-at-a-time planning loop.
-- `docs/FUTURE.md` — roadmap / deferred ideas (animation, true superellipse, link
-  highlighting, node text editing, undo/redo, richer LLM UX, Wayland, …).
+- `docs/FUTURE.md` — roadmap / deferred ideas (keyboard-first operation, auto-align
+  animation, true superellipse, richer LLM UX, multiple graphs, Wayland, …); its "v2 —
+  in this release" section is the source of truth for what §4's v2 features cover.
 - `README.md` — user-facing quick start.
