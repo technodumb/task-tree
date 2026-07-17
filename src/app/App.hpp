@@ -64,6 +64,7 @@ private:
     void undo();   // Ctrl+Z: restore the previous forest state
     void redo();   // Ctrl+Shift+Z / Ctrl+Y: reapply an undone state
     void afterHistoryChange();  // shared relayout/cleanup after an undo or redo
+    void deleteSelected();      // Delete/Backspace: remove the selected subtree (undoable)
     TaskId hitTest(Vec2 p) const;
     bool caretOn() const;
     DragVisual buildDragVisual();

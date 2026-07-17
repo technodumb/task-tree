@@ -121,6 +121,14 @@ void App::onKey(int key, int action, int mods) {
         return;
     }
 
+    // Delete / Backspace removes the selected subtree — but only when the input bar is
+    // empty (otherwise those keys edit the text being typed). Undo-backed, so no confirm.
+    if ((key == GLFW_KEY_DELETE || key == GLFW_KEY_BACKSPACE) &&
+        selected_ != 0 && input_.text().empty()) {
+        deleteSelected();
+        return;
+    }
+
     switch (input_.onKey(key, mods)) {
         case TextInput::Action::Submit: commitInput(); break;
         case TextInput::Action::Cancel: hide(); break;
@@ -719,6 +727,19 @@ void App::undo() {
 void App::redo() {
     if (!history_.redo(forest_)) return;
     afterHistoryChange();
+}
+
+void App::deleteSelected() {
+    if (selected_ == 0 || !forest_.exists(selected_)) { selected_ = 0; return; }
+    if (drag_.active()) drag_.cancel();
+    history_.snapshot(forest_);          // undo checkpoint before removal
+    const TaskId victim = selected_;
+    selected_ = 0;
+    doneExpanded_.erase(victim);
+    forest_.removeSubtree(victim);       // removes the node and its whole subtree
+    forceRelayout();
+    if (searching_) updateSearchMatches();
+    save();
 }
 
 void App::afterHistoryChange() {
