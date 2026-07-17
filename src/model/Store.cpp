@@ -34,6 +34,7 @@ bool load(Forest& f, const std::string& path) {
         t.parent = jt.value("parent", kNoParent);
         t.text = jt.value("text", std::string{});
         t.done = jt.value("done", false);
+        t.collapsed = jt.value("collapsed", false);
         t.status = jt.value("status", 0);
         t.createdAt = jt.value("createdAt", std::int64_t{0});
         t.doneAt = jt.value("doneAt", std::int64_t{0});   // 0/null for pre-existing tasks
@@ -75,6 +76,7 @@ bool save(const Forest& f, const std::string& path) {
             {"parent", t.parent},
             {"text", t.text},
             {"done", t.done},
+            {"collapsed", t.collapsed},
             {"status", t.status},
             {"createdAt", t.createdAt},
             {"doneAt", t.doneAt},

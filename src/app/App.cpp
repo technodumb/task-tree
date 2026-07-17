@@ -235,6 +235,11 @@ void App::onMouseButton(int button, int action, int mods) {
         lastClickTime_ = dbl ? 0.0 : t;
         lastClickPos_ = mouse_;
         if (dbl) { handleDoubleClick(); return; }
+        // Collapse/expand handle (world space) wins over selecting/dragging the node.
+        if (!pointInPanel(mouse_)) {
+            const TaskId cId = collapseHandleHit(worldMouse());
+            if (cId != 0) { toggleCollapse(cId); return; }
+        }
         // Single press: DONE panel toggles a row's children (screen space); on the
         // canvas, a node starts a drag, empty space starts a pan (world space).
         if (pointInPanel(mouse_)) {
@@ -719,6 +724,23 @@ TaskId App::hitTest(Vec2 p) const {
     for (const auto& [id, r] : rects_)
         if (pointInRoundedRect(r, cfg_.cornerRadius, p.x, p.y)) return id;
     return 0;
+}
+
+TaskId App::collapseHandleHit(Vec2 p) const {
+    for (const auto& [id, r] : rects_) {
+        const Task* t = forest_.get(id);
+        if (!t || t->children.empty()) continue;   // handle only shown on nodes with children
+        if (collapseHandle(r).contains(p.x, p.y)) return id;
+    }
+    return 0;
+}
+
+void App::toggleCollapse(TaskId id) {
+    Task* t = forest_.get(id);
+    if (!t || t->children.empty()) return;
+    t->collapsed = !t->collapsed;   // a view toggle, not a structural edit -> no undo entry
+    forceRelayout();
+    save();                         // collapsed state is persisted in the model
 }
 
 bool App::caretOn() const {

@@ -36,6 +36,14 @@ struct Rect {
     }
 };
 
+// Bounding box of a node's collapse/expand handle: a small square centred on the middle
+// of the node's bottom edge. Shared by the renderer (draw) and App (hit-test) so the
+// clickable region and the drawn glyph always coincide.
+inline Rect collapseHandle(const Rect& node) {
+    constexpr float s = 18.f;
+    return Rect{node.cx() - s * 0.5f, node.bottom() - s * 0.5f, s, s};
+}
+
 // Hit test against a rounded rectangle: inside the straight edges always counts;
 // inside a corner square counts only if within `r` of that corner's arc centre.
 inline bool pointInRoundedRect(const Rect& box, float r, float px, float py) {

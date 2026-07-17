@@ -205,6 +205,27 @@ int main() {
         CHECK(freshDev != doneDev, "does not resurrect a DONE dev node; makes a fresh one");
     }
 
+    { // collapse hides a subtree from layout (the nodes remain in the model)
+        Forest f;
+        TaskId root = f.addTask("root");
+        TaskId a = f.addTask("a", root);
+        TaskId b = f.addTask("b", root);
+        f.addTask("a1", a);
+        f.addTask("a2", a);
+        std::unordered_map<TaskId, Size> s;
+
+        auto full = computeLayout(f, s, P);
+        CHECK(full.size() == f.size(), "all 5 nodes laid out when nothing is collapsed");
+
+        f.get(a)->collapsed = true;
+        auto col = computeLayout(f, s, P);
+        CHECK(col.size() == 3, "collapsed a's two children are omitted from layout");
+        CHECK(col.count(root) && col.count(a) && col.count(b), "root, a, b still laid out");
+        CHECK(col.count(f.get(a)->children[0]) == 0, "hidden child a1 not in layout");
+        CHECK(f.size() == 5, "model still holds every node (collapse is view-only)");
+        CHECK(col[a].y >= col[root].bottom() - EPS, "collapsed a still sits below its parent");
+    }
+
     { // undo/redo history over Forest snapshots
         Forest f;
         TaskId a = f.addTask("a");

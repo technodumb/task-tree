@@ -14,6 +14,15 @@ NVGcolor col(const Color& c, float alphaMul = 1.f) {
 
 const char* end(const std::string& s) { return s.c_str() + s.size(); }
 
+// Total number of nodes beneath `id` (excluding `id` itself).
+int countDescendants(const Forest& f, TaskId id) {
+    const Task* t = f.get(id);
+    if (!t) return 0;
+    int n = 0;
+    for (TaskId c : t->children) n += 1 + countDescendants(f, c);
+    return n;
+}
+
 } // namespace
 
 bool Renderer::init(NVGcontext* vg, const std::string& fontPath) {
@@ -159,6 +168,38 @@ void Renderer::drawNode(const Rect& r, const std::string& text, const Config& cf
     nvgText(vg_, bx + 6.f, by + 3.f, label.c_str(), nullptr);
 }
 
+void Renderer::drawCollapseHandle(const Rect& node, bool collapsed, int hiddenCount,
+                                  const Config& cfg) const {
+    const Rect h = collapseHandle(node);
+    const float cx = h.cx(), cy = h.cy(), rad = h.w * 0.5f;
+    nvgBeginPath(vg_);
+    nvgCircle(vg_, cx, cy, rad);
+    nvgFillColor(vg_, col(cfg.idBadgeBg));
+    nvgFill(vg_);
+    nvgStrokeColor(vg_, col(cfg.nodeBorder));
+    nvgStrokeWidth(vg_, 1.f);
+    nvgStroke(vg_);
+
+    if (collapsed) {
+        // Show how many descendants are hidden (also the "expand me" affordance).
+        const std::string n = std::to_string(hiddenCount);
+        nvgFontFaceId(vg_, font_);
+        nvgFontSize(vg_, rad * 1.3f);
+        nvgTextAlign(vg_, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFillColor(vg_, col(cfg.idBadgeText));
+        nvgText(vg_, cx, cy + 0.5f, n.c_str(), nullptr);
+    } else {
+        // Minus sign -> click to collapse.
+        nvgBeginPath(vg_);
+        nvgMoveTo(vg_, cx - rad * 0.45f, cy);
+        nvgLineTo(vg_, cx + rad * 0.45f, cy);
+        nvgStrokeColor(vg_, col(cfg.idBadgeText));
+        nvgStrokeWidth(vg_, 1.7f);
+        nvgLineCap(vg_, NVG_ROUND);
+        nvgStroke(vg_);
+    }
+}
+
 void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>& rects,
                         const Config& cfg, const DragVisual& dv, Vec2 pan, float zoom,
                         const std::unordered_set<TaskId>& pathHi, float pathStrength,
@@ -200,6 +241,9 @@ void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>&
         if (const Rect* r = rectOf(id)) {
             const bool hi = dv.active && dv.validTarget && id == dv.target;
             drawNode(*r, t.text, cfg, hi, 1.f, id, t.status);
+            // A node with children gets a collapse/expand handle on its bottom edge.
+            if (!t.children.empty())
+                drawCollapseHandle(*r, t.collapsed, t.collapsed ? countDescendants(f, id) : 0, cfg);
         }
     }
 

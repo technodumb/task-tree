@@ -58,7 +58,9 @@ struct Walker {
         const Size sz = sizeOf(id);
         const float hw = sz.w * 0.5f;
         const Task* t = forest.get(id);
-        const std::vector<TaskId>& kids = t ? t->children : std::vector<TaskId>{};
+        // A collapsed node is laid out as a leaf — its subtree is hidden entirely.
+        static const std::vector<TaskId> kEmpty;
+        const std::vector<TaskId>& kids = (t && !t->collapsed) ? t->children : kEmpty;
 
         if (kids.empty()) {
             return Contour{{-hw}, {hw}};
@@ -137,7 +139,7 @@ std::unordered_map<TaskId, Rect> computeLayout(const Forest& forest,
         if (static_cast<int>(layerMaxH.size()) <= f.d) layerMaxH.resize(f.d + 1, 0.f);
         layerMaxH[f.d] = std::max(layerMaxH[f.d], sz.h);
 
-        if (const Task* t = forest.get(f.id)) {
+        if (const Task* t = forest.get(f.id); t && !t->collapsed) {
             for (auto it = t->children.rbegin(); it != t->children.rend(); ++it)
                 stack.push_back({*it, f.d + 1, ax});
         }

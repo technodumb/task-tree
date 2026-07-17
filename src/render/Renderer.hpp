@@ -100,6 +100,11 @@ private:
                   bool highlight, float alphaMul, TaskId id, int status) const;
     void drawEdge(const Rect& parent, const Rect& child, const Config& cfg) const;
 
+    // Collapse/expand handle on a node with children: a small disc on the bottom edge.
+    // Collapsed -> shows the hidden-descendant count; expanded -> a minus sign.
+    void drawCollapseHandle(const Rect& node, bool collapsed, int hiddenCount,
+                            const Config& cfg) const;
+
     // Shared chrome for the input + search fields (drop shadow, rounded fill, border).
     // They are the same component; only the border colour differs.
     void drawFieldChrome(float bx, float by, float w, float h,

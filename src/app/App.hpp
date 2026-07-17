@@ -71,6 +71,8 @@ private:
     void commitEdit(const std::string& txt); // apply the edit (or cancel if empty/unchanged)
     void cancelEditing();                  // Esc: abandon the edit, leave the node as-is
     TaskId hitTest(Vec2 p) const;
+    TaskId collapseHandleHit(Vec2 p) const;  // node whose collapse handle contains p (0 = none)
+    void   toggleCollapse(TaskId id);        // flip a node's collapsed flag + relayout
     bool caretOn() const;
     DragVisual buildDragVisual();
 
