@@ -115,6 +115,7 @@ bool Forest::restoreFromDone(TaskId id) {
     if (it != doneRoots.end()) doneRoots.erase(it);
     else detachFromParent(id); // a descendant expanded inside a done subtree
     t->done = false;
+    t->doneAt = 0;             // no longer done -> clear the done timestamp
     t->parent = kNoParent;
     roots.push_back(id);
     return true;

@@ -238,6 +238,7 @@ void App::commitInput() {
     input_.clear();
     forceRelayout();
     flashPath(id);   // briefly show where the new node landed (standalone -> just itself)
+    focusNode_ = id; // pan the canvas to bring the new node into view
     save();
     if (mode_ == Mode::QuickAdd) hide();
 }
@@ -337,7 +338,7 @@ void App::applyPendingClassifications() {
                           std::to_string(id) + " target=" + std::to_string(r.targetId));
         }
     }
-    if (changed) { forceRelayout(); save(); flashPath(flashLeaf); }
+    if (changed) { forceRelayout(); save(); flashPath(flashLeaf); focusNode_ = flashLeaf; }
 }
 
 // ---- layout + render -------------------------------------------------------
@@ -375,6 +376,18 @@ void App::drawScene(int winW, int winH, float dpr) {
     const float cw = static_cast<float>(winW);
     if (params_.centerWidth != cw) { params_.centerWidth = cw; needsRelayout_ = true; }
     relayoutIfNeeded();
+
+    // Pan to bring a just-added / just-reparented node into view (centre-ish, above
+    // the input bar). Done after relayout so its rect is current.
+    if (focusNode_ != 0) {
+        auto it = rects_.find(focusNode_);
+        if (it != rects_.end()) {
+            pan_.x = winW * 0.5f - zoom_ * it->second.cx();
+            pan_.y = winH * 0.4f - zoom_ * it->second.cy();
+        }
+        focusNode_ = 0;
+    }
+
     layoutDonePanel(winW, winH);
 
     renderer_.beginFrame(winW, winH, dpr);
@@ -493,7 +506,11 @@ void App::handleDoubleClick() {
         const TaskId id = hitTest(worldMouse());
         if (id != 0) {
             if (drag_.active()) drag_.cancel();
-            if (forest_.markDone(id)) { forceRelayout(); save(); }
+            if (forest_.markDone(id)) {
+                if (Task* t = forest_.get(id)) t->doneAt = nowMs();  // record done date
+                forceRelayout();
+                save();
+            }
         } else {
             pan_ = {0.f, 0.f}; // double-click empty canvas recenters + resets zoom
             zoom_ = 1.f;

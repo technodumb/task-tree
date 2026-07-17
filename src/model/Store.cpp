@@ -36,6 +36,7 @@ bool load(Forest& f, const std::string& path) {
         t.done = jt.value("done", false);
         t.status = jt.value("status", 0);
         t.createdAt = jt.value("createdAt", std::int64_t{0});
+        t.doneAt = jt.value("doneAt", std::int64_t{0});   // 0/null for pre-existing tasks
         for (const auto& c : jt.value("children", json::array()))
             t.children.push_back(c.get<TaskId>());
         f.nextId = std::max<TaskId>(f.nextId, t.id + 1);
@@ -76,6 +77,7 @@ bool save(const Forest& f, const std::string& path) {
             {"done", t.done},
             {"status", t.status},
             {"createdAt", t.createdAt},
+            {"doneAt", t.doneAt},
             {"children", t.children},
         });
     }

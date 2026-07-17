@@ -100,6 +100,7 @@ private:
     // Canvas view transform (screen = pan + zoom * world). Screen-space UI is unaffected.
     Vec2  pan_;
     float zoom_ = 1.f;
+    TaskId focusNode_ = 0;   // pan to centre this node on the next frame (0 = none)
     bool  panning_ = false;
     Vec2  panGrab_;     // screen cursor at pan start
     Vec2  panOrigin_;   // pan_ at pan start
