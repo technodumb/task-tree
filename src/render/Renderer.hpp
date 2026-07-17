@@ -68,7 +68,12 @@ public:
     // at intensity `pathStrength` (0 = none) — used to flash the path to a new task.
     void drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>& rects,
                   const Config& cfg, const DragVisual& dv, Vec2 pan, float zoom,
-                  const std::unordered_set<TaskId>& pathHi, float pathStrength);
+                  const std::unordered_set<TaskId>& pathHi, float pathStrength,
+                  const std::unordered_set<TaskId>& searchHits);
+
+    // Search bar (top-centre) shown while Ctrl+F search is active.
+    void drawSearchBar(float screenW, const std::string& query, std::size_t caretByte,
+                       bool caretOn, int matchCount, const Config& cfg);
 
     // The input widget. In quick-add mode it's a centred box with a drop shadow;
     // otherwise a bar at the bottom of the overlay.

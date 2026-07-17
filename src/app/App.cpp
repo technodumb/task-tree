@@ -1,6 +1,7 @@
 #include "app/App.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -63,6 +64,7 @@ void App::hide() {
     input_.setFocused(false);
     input_.clear();
     drag_.cancel();
+    exitSearch();
     platform_.hideOverlay();
 }
 
@@ -70,7 +72,8 @@ void App::hide() {
 
 void App::onChar(unsigned int codepoint) {
     if (mode_ == Mode::Hidden) return;
-    input_.onChar(codepoint);
+    if (searching_) { search_.onChar(codepoint); updateSearchMatches(); }
+    else            input_.onChar(codepoint);
 }
 
 void App::onKey(int key, int action, int mods) {
@@ -78,18 +81,62 @@ void App::onKey(int key, int action, int mods) {
 
     if (key == GLFW_KEY_ESCAPE && drag_.active()) { drag_.cancel(); return; }
 
+    TextInput& field = searching_ ? search_ : input_;
+
     if (mods & GLFW_MOD_CONTROL) {
         if (key == GLFW_KEY_V) {
-            if (const char* clip = glfwGetClipboardString(platform_.window())) input_.insert(clip);
+            if (const char* clip = glfwGetClipboardString(platform_.window())) {
+                field.insert(clip);
+                if (searching_) updateSearchMatches();
+            }
             return;
         }
-        if (key == GLFW_KEY_M) { moveOverlayToNextMonitor(); return; } // next monitor
+        if (key == GLFW_KEY_M) { moveOverlayToNextMonitor(); return; }        // next monitor
+        if (key == GLFW_KEY_F && mode_ == Mode::Full) { toggleSearch(); return; } // find
+    }
+
+    if (searching_) {
+        switch (search_.onKey(key, mods)) {
+            case TextInput::Action::Cancel: exitSearch(); break;
+            case TextInput::Action::Submit: // Enter: centre the first match, keep searching
+                if (!searchHits_.empty()) focusNode_ = *std::min_element(searchHits_.begin(),
+                                                                         searchHits_.end());
+                break;
+            case TextInput::Action::None: updateSearchMatches(); break;
+        }
+        return;
     }
 
     switch (input_.onKey(key, mods)) {
         case TextInput::Action::Submit: commitInput(); break;
         case TextInput::Action::Cancel: hide(); break;
         case TextInput::Action::None:   break;
+    }
+}
+
+void App::toggleSearch() {
+    searching_ = !searching_;
+    search_.clear();
+    searchHits_.clear();
+    search_.setFocused(searching_);
+}
+
+void App::exitSearch() {
+    searching_ = false;
+    search_.clear();
+    searchHits_.clear();
+}
+
+void App::updateSearchMatches() {
+    searchHits_.clear();
+    std::string q = search_.text();
+    for (char& c : q) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (q.empty()) return;
+    for (const auto& [id, t] : forest_.nodes) {
+        if (forest_.isInDoneSection(id)) continue; // only canvas nodes are on screen
+        std::string lt = t.text;
+        for (char& c : lt) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (lt.find(q) != std::string::npos) searchHits_.insert(id);
     }
 }
 
@@ -401,10 +448,14 @@ void App::drawScene(int winW, int winH, float dpr) {
             if (now < highlightUntil_) hi = static_cast<float>((highlightUntil_ - now) / kFlashDuration);
             else highlightSet_.clear();
         }
-        renderer_.drawTree(forest_, drawRects, cfg_, dv, pan_, zoom_, highlightSet_, hi);
+        renderer_.drawTree(forest_, drawRects, cfg_, dv, pan_, zoom_, highlightSet_, hi, searchHits_);
         if (donePanel_.visible)
             renderer_.drawDonePanel(donePanel_, forest_, doneRows_, cfg_);
-        renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(), cfg_, false);
+        if (searching_)
+            renderer_.drawSearchBar(winW, search_.text(), search_.caret(), caretOn(),
+                                    (int)searchHits_.size(), cfg_);
+        else
+            renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(), cfg_, false);
     } else if (mode_ == Mode::QuickAdd) {
         renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(), cfg_, true);
     }

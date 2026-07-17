@@ -161,7 +161,8 @@ void Renderer::drawNode(const Rect& r, const std::string& text, const Config& cf
 
 void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>& rects,
                         const Config& cfg, const DragVisual& dv, Vec2 pan, float zoom,
-                        const std::unordered_set<TaskId>& pathHi, float pathStrength) {
+                        const std::unordered_set<TaskId>& pathHi, float pathStrength,
+                        const std::unordered_set<TaskId>& searchHits) {
     nvgSave(vg_);
     nvgTranslate(vg_, pan.x, pan.y);  // screen = pan + zoom * world
     nvgScale(vg_, zoom, zoom);
@@ -236,6 +237,19 @@ void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>&
             nvgBeginPath(vg_);
             nvgRoundedRect(vg_, r->x - 2.f, r->y - 2.f, r->w + 4.f, r->h + 4.f, cfg.cornerRadius + 2.f);
             nvgStrokeColor(vg_, hc);
+            nvgStrokeWidth(vg_, 3.f);
+            nvgStroke(vg_);
+        }
+    }
+
+    // Search matches: amber ring around each matching node.
+    if (!searchHits.empty()) {
+        for (TaskId id : searchHits) {
+            const Rect* r = rectOf(id);
+            if (!r) continue;
+            nvgBeginPath(vg_);
+            nvgRoundedRect(vg_, r->x - 3.f, r->y - 3.f, r->w + 6.f, r->h + 6.f, cfg.cornerRadius + 3.f);
+            nvgStrokeColor(vg_, nvgRGBA(245, 200, 70, 255));
             nvgStrokeWidth(vg_, 3.f);
             nvgStroke(vg_);
         }
@@ -338,6 +352,67 @@ void Renderer::drawInput(float screenW, float screenH, const std::string& text,
         nvgBeginPath(vg_);
         nvgMoveTo(vg_, caretX, caretY);
         nvgLineTo(vg_, caretX, caretY + glyphH);
+        nvgStrokeColor(vg_, col(cfg.nodeText));
+        nvgStrokeWidth(vg_, 1.4f);
+        nvgStroke(vg_);
+    }
+}
+
+void Renderer::drawSearchBar(float screenW, const std::string& query, std::size_t caretByte,
+                             bool caretOn, int matchCount, const Config& cfg) {
+    const float boxW = std::min(560.f, std::max(360.f, screenW * 0.5f));
+    const float boxH = fontSize_ + 2 * padY_ + 8.f;
+    const float bx = (screenW - boxW) * 0.5f;
+    const float by = 48.f;                    // top-centre, out of the way of the tree
+    const float r = cfg.cornerRadius;
+
+    NVGpaint shadow = nvgBoxGradient(vg_, bx, by + 4, boxW, boxH, r * 1.5f, 20.f,
+                                     nvgRGBA(0, 0, 0, 140), nvgRGBA(0, 0, 0, 0));
+    nvgBeginPath(vg_);
+    nvgRect(vg_, bx - 40, by - 40, boxW + 80, boxH + 80);
+    nvgRoundedRect(vg_, bx, by, boxW, boxH, r);
+    nvgPathWinding(vg_, NVG_HOLE);
+    nvgFillPaint(vg_, shadow);
+    nvgFill(vg_);
+
+    nvgBeginPath(vg_);
+    nvgRoundedRect(vg_, bx, by, boxW, boxH, r);
+    nvgFillColor(vg_, col(cfg.quickAddFill));
+    nvgFill(vg_);
+    nvgStrokeColor(vg_, nvgRGBA(245, 200, 70, 220));   // amber, matches the node rings
+    nvgStrokeWidth(vg_, 1.5f);
+    nvgStroke(vg_);
+
+    nvgFontFaceId(vg_, font_);
+    nvgFontSize(vg_, fontSize_);
+    nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+    const float ty = by + boxH * 0.5f;
+    const float lx = bx + padX_;
+    nvgFillColor(vg_, col(cfg.nodeText, 0.5f));
+    const float lw = nvgTextBounds(vg_, 0, 0, "Find ", nullptr, nullptr);
+    nvgText(vg_, lx, ty, "Find ", nullptr);
+    const float tx = lx + lw;
+
+    if (query.empty()) {
+        nvgFillColor(vg_, col(cfg.nodeText, 0.35f));
+        nvgText(vg_, tx, ty, "search nodes…", nullptr);
+    } else {
+        nvgFillColor(vg_, col(cfg.nodeText));
+        nvgText(vg_, tx, ty, query.c_str(), end(query));
+        const std::string mc = std::to_string(matchCount) + (matchCount == 1 ? " match" : " matches");
+        nvgTextAlign(vg_, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
+        nvgFillColor(vg_, col(cfg.nodeText, 0.55f));
+        nvgText(vg_, bx + boxW - padX_, ty, mc.c_str(), nullptr);
+    }
+
+    if (caretOn) {
+        const std::string prefix = query.substr(0, std::min(caretByte, query.size()));
+        const float adv = prefix.empty() ? 0.f
+                        : nvgTextBounds(vg_, 0, 0, prefix.c_str(), end(prefix), nullptr);
+        const float cx = tx + adv;
+        nvgBeginPath(vg_);
+        nvgMoveTo(vg_, cx, by + 6);
+        nvgLineTo(vg_, cx, by + boxH - 6);
         nvgStrokeColor(vg_, col(cfg.nodeText));
         nvgStrokeWidth(vg_, 1.4f);
         nvgStroke(vg_);

@@ -87,6 +87,14 @@ private:
     DragController drag_;
     LayoutParams params_;
 
+    // Search (Ctrl+F in the full overlay): live-highlight matching canvas nodes.
+    bool searching_ = false;
+    TextInput search_;
+    std::unordered_set<TaskId> searchHits_;
+    void toggleSearch();
+    void exitSearch();
+    void updateSearchMatches();
+
     std::unordered_map<TaskId, Size> sizes_;
     std::unordered_map<TaskId, Rect> rects_;        // current layout
     std::unordered_map<TaskId, Rect> previewRects_; // layout during a drag
