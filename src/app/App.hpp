@@ -14,6 +14,7 @@
 #include "layout/Geometry.hpp"
 #include "layout/TidyLayout.hpp"
 #include "llm/IClassifier.hpp"
+#include "model/History.hpp"
 #include "model/Task.hpp"
 #include "platform/IPlatform.hpp"
 #include "render/Renderer.hpp"
@@ -54,6 +55,9 @@ private:
 
     void relayoutIfNeeded();
     void forceRelayout() { needsRelayout_ = true; }
+    void undo();   // Ctrl+Z: restore the previous forest state (moves a node back, undoes an add/delete/done)
+    void redo();   // Ctrl+Shift+Z / Ctrl+Y: reapply an undone state
+    void afterHistoryChange();  // shared relayout/cleanup after an undo or redo
     void commitInput();
     void flashPath(TaskId leaf);   // briefly highlight root -> leaf after an add/classify
     // Current canvas tree (excluding DONE and `exclude`) as an indented "[id] text"
@@ -87,6 +91,7 @@ private:
     TextInput input_;
     DragController drag_;
     LayoutParams params_;
+    History history_;   // undo/redo snapshots of forest_
 
     // Search (Ctrl+F in the full overlay): live-highlight matching canvas nodes.
     bool searching_ = false;
