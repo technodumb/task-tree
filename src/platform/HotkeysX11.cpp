@@ -1,10 +1,16 @@
+// X11 backend for Hotkeys: passive XGrabKey grabs on the root window, read on a
+// dedicated thread with our own X connection so they are delivered to us rather
+// than swallowed by GLFW's event pump.
+
 #include "platform/Hotkeys.hpp"
 
 #include <sys/select.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <thread>
 
 #include <X11/Xlib.h>
 #include <X11/keysym.h>
@@ -53,16 +59,6 @@ KeySym resolveKeysym(const std::string& key) {
     return XStringToKeysym(cap.c_str());
 }
 
-std::string describe(const HotkeySpec& s) {
-    std::string out;
-    if (s.mods & Mod_Ctrl)  out += "Ctrl+";
-    if (s.mods & Mod_Alt)   out += "Alt+";
-    if (s.mods & Mod_Shift) out += "Shift+";
-    if (s.mods & Mod_Super) out += "Super+";
-    out += s.key;
-    return out;
-}
-
 std::atomic<bool> g_grabError{false};
 int grabErrorHandler(Display*, XErrorEvent* e) {
     if (e->error_code == BadAccess) g_grabError = true;
@@ -71,74 +67,88 @@ int grabErrorHandler(Display*, XErrorEvent* e) {
 
 } // namespace
 
-Hotkeys::~Hotkeys() { stop(); }
+struct Hotkeys::Impl {
+    Hotkeys* owner = nullptr;
+    Display* display = nullptr;
+    Window   root = 0;
+    int      wakePipe[2] = {-1, -1}; // self-pipe to break the blocking select()
+    std::atomic<bool> running{false};
+    std::thread thread;
 
-void Hotkeys::add(const HotkeySpec& spec, std::function<void()> cb) {
-    if (!spec.valid()) return;
-    bindings_.push_back(Binding{spec, std::move(cb), 0, 0});
-}
+    // Resolved grabs, parallel to owner->bindings_.
+    std::vector<KeyCode>  keycodes;
+    std::vector<unsigned> baseMods;
+
+    void threadMain();
+};
+
+Hotkeys::Hotkeys() : impl_(std::make_unique<Impl>()) { impl_->owner = this; }
+Hotkeys::~Hotkeys() { stop(); }
 
 bool Hotkeys::start() {
     Display* dpy = XOpenDisplay(nullptr);
     if (!dpy) return false;
-    display_ = dpy;
-    root_ = DefaultRootWindow(dpy);
+    impl_->display = dpy;
+    impl_->root = DefaultRootWindow(dpy);
 
-    if (pipe(wakePipe_) != 0) { XCloseDisplay(dpy); display_ = nullptr; return false; }
+    if (pipe(impl_->wakePipe) != 0) {
+        XCloseDisplay(dpy);
+        impl_->display = nullptr;
+        return false;
+    }
+
+    impl_->keycodes.assign(bindings_.size(), 0);
+    impl_->baseMods.assign(bindings_.size(), 0);
 
     const auto combos = nuisanceCombos();
     XErrorHandler prev = XSetErrorHandler(grabErrorHandler);
-    for (Binding& b : bindings_) {
-        KeySym ks = resolveKeysym(b.spec.key);
+    for (std::size_t i = 0; i < bindings_.size(); ++i) {
+        const HotkeySpec& spec = bindings_[i].spec;
+        KeySym ks = resolveKeysym(spec.key);
         KeyCode kc = (ks != NoSymbol) ? XKeysymToKeycode(dpy, ks) : 0;
-        if (kc == 0) { failed_.push_back(describe(b.spec)); continue; }
-        b.keycode = kc;
-        b.baseMods = toXMods(b.spec.mods);
+        if (kc == 0) { failed_.push_back(describeHotkey(spec)); continue; }
+        impl_->keycodes[i] = kc;
+        impl_->baseMods[i] = toXMods(spec.mods);
 
         g_grabError = false;
         for (unsigned nuis : combos)
-            XGrabKey(dpy, kc, b.baseMods | nuis, root_, False, GrabModeAsync, GrabModeAsync);
+            XGrabKey(dpy, kc, impl_->baseMods[i] | nuis, impl_->root, False,
+                     GrabModeAsync, GrabModeAsync);
         XSync(dpy, False);
-        if (g_grabError) failed_.push_back(describe(b.spec));
+        if (g_grabError) failed_.push_back(describeHotkey(spec));
     }
     XSetErrorHandler(prev);
 
-    running_ = true;
-    thread_ = std::thread(&Hotkeys::threadMain, this);
+    impl_->running = true;
+    impl_->thread = std::thread(&Hotkeys::Impl::threadMain, impl_.get());
     return true;
 }
 
-void Hotkeys::threadMain() {
-    Display* dpy = static_cast<Display*>(display_);
-    const int xfd = ConnectionNumber(dpy);
-    while (running_) {
+void Hotkeys::Impl::threadMain() {
+    const int xfd = ConnectionNumber(display);
+    while (running) {
         fd_set fds;
         FD_ZERO(&fds);
         FD_SET(xfd, &fds);
-        FD_SET(wakePipe_[0], &fds);
-        const int maxfd = std::max(xfd, wakePipe_[0]) + 1;
+        FD_SET(wakePipe[0], &fds);
+        const int maxfd = std::max(xfd, wakePipe[0]) + 1;
 
         if (select(maxfd, &fds, nullptr, nullptr, nullptr) < 0) break;
 
-        if (FD_ISSET(wakePipe_[0], &fds)) {
+        if (FD_ISSET(wakePipe[0], &fds)) {
             char buf[16];
-            while (read(wakePipe_[0], buf, sizeof(buf)) > 0) {}
-            if (!running_) break;
+            while (read(wakePipe[0], buf, sizeof(buf)) > 0) {}
+            if (!running) break;
         }
 
-        while (XPending(dpy)) {
+        while (XPending(display)) {
             XEvent ev;
-            XNextEvent(dpy, &ev);
+            XNextEvent(display, &ev);
             if (ev.type != KeyPress) continue;
             const unsigned state = ev.xkey.state & ~kNuisance;
-            for (std::size_t i = 0; i < bindings_.size(); ++i) {
-                if (bindings_[i].keycode == ev.xkey.keycode &&
-                    state == bindings_[i].baseMods) {
-                    {
-                        std::lock_guard<std::mutex> lock(queueMutex_);
-                        pending_.push_back(i);
-                    }
-                    if (wake_) wake_();
+            for (std::size_t i = 0; i < keycodes.size(); ++i) {
+                if (keycodes[i] == ev.xkey.keycode && state == baseMods[i]) {
+                    owner->queuePress(i);
                     break;
                 }
             }
@@ -146,33 +156,22 @@ void Hotkeys::threadMain() {
     }
 }
 
-void Hotkeys::drain() {
-    std::vector<std::size_t> local;
-    {
-        std::lock_guard<std::mutex> lock(queueMutex_);
-        local.swap(pending_);
-    }
-    for (std::size_t i : local)
-        if (i < bindings_.size() && bindings_[i].cb) bindings_[i].cb();
-}
-
 void Hotkeys::stop() {
-    if (!display_) return;
-    running_ = false;
-    if (wakePipe_[1] >= 0) {
+    if (!impl_ || !impl_->display) return;
+    impl_->running = false;
+    if (impl_->wakePipe[1] >= 0) {
         const char b = 1;
-        ssize_t n = write(wakePipe_[1], &b, 1);
+        ssize_t n = write(impl_->wakePipe[1], &b, 1);
         (void)n;
     }
-    if (thread_.joinable()) thread_.join();
+    if (impl_->thread.joinable()) impl_->thread.join();
 
-    Display* dpy = static_cast<Display*>(display_);
-    for (const Binding& b : bindings_)
-        if (b.keycode) XUngrabKey(dpy, b.keycode, AnyModifier, root_);
-    XCloseDisplay(dpy);
-    display_ = nullptr;
+    for (KeyCode kc : impl_->keycodes)
+        if (kc) XUngrabKey(impl_->display, kc, AnyModifier, impl_->root);
+    XCloseDisplay(impl_->display);
+    impl_->display = nullptr;
 
-    for (int& fd : wakePipe_)
+    for (int& fd : impl_->wakePipe)
         if (fd >= 0) { close(fd); fd = -1; }
 }
 

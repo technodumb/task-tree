@@ -19,8 +19,9 @@ open, dump/organize a thought, flick it away. Native **C++ + GLFW + OpenGL + Nan
 deliberately *not* a browser/Electron stack. A resident background process at ~0% CPU
 when idle (on-demand rendering); a stripped production binary is ~1.5 MB.
 
-Status: proof-of-concept, **X11 only** (Wayland is future work). The app is being
-dogfood-developed *through itself* — see the "ttd" workflow in `CLAUDE.md`.
+Status: proof-of-concept, running on **Linux/X11 and macOS** (Wayland is future work).
+The app is being dogfood-developed *through itself* — see the "ttd" workflow in
+`CLAUDE.md`.
 
 ---
 
@@ -41,7 +42,7 @@ mutex-guarded queue + `glfwPostEmptyEvent()`.
 ## 3. Architecture (layers + seams)
 
 ```
-platform/  X11 window + global hotkeys      ← behind IPlatform (Wayland can slot in)
+platform/  Overlay window + global hotkeys  ← behind IPlatform (X11 + macOS backends)
 render/    NanoVG drawing (nodes/edges/UI)
 ui/        TextInput (line editor) + DragController
 layout/    PURE tidy-tree engine + geometry  ← no GL, unit-tested
@@ -51,10 +52,17 @@ llm/       Pluggable classifier               ← behind IClassifier
 app/       App state machine, Config, paths, ttd routing
 ```
 
-Two deliberate **seams** (single-impl today, exist for extension — do not delete as
-"dead code"):
-- **`IPlatform`** (`platform/IPlatform.hpp`) — window + hotkeys. `PlatformX11` implements
-  it; a `PlatformWayland`/Win/Mac would slot in here.
+Two deliberate **seams** (exist for extension — do not delete as "dead code"):
+- **`IPlatform`** (`platform/IPlatform.hpp`) — window + hotkeys. `PlatformGlfw`
+  implements it for every OS; GLFW already abstracts X11 vs Cocoa, so only the two
+  things it cannot express portably are split per-OS:
+  - `native::applyOverlayHints` / `activateForInput` (`platform/NativeWindow.hpp`) —
+    "always-on-top utility window, off the taskbar" and "take the keyboard now".
+    `NativeWindowX11.cpp` sets EWMH properties; `NativeWindowMac.mm` sets the NSWindow
+    level/collection behaviour and an accessory activation policy.
+  - `Hotkeys` (`platform/Hotkeys.hpp`) — the queue plumbing is shared; the grabbing is
+    `HotkeysX11.cpp` (`XGrabKey`) or `HotkeysMac.mm` (`RegisterEventHotKey`).
+  A `PlatformWayland` needs only a third pair of these files.
 - **`IClassifier`** (`llm/IClassifier.hpp`) — task classification. `NullClassifier`
   (default, everything standalone) and `OpenAiClassifier` (any OpenAI-compatible
   endpoint) implement it.
@@ -83,8 +91,10 @@ snapshots, so any mutation is reversible without per-op inverse logic (v2).
 
 **Overlay & capture**
 - Two customizable global hotkeys: **toggle full overlay** (`Ctrl+Alt+Space`) and
-  **quick-add** (`Ctrl+Alt+Return`). Grabbed via Xlib `XGrabKey` on a dedicated thread
-  (handles nuisance modifiers; warns if a chord is already taken).
+  **quick-add** (`Ctrl+Alt+Return`). On X11, grabbed via Xlib `XGrabKey` on a dedicated
+  thread (handles nuisance modifiers); on macOS via Carbon `RegisterEventHotKey`, which
+  needs no Accessibility permission. Either way a matched press is queued and run on the
+  main thread, and any chord already taken is warned about.
 - Transparent, borderless, always-on-top, monitor-covering window; instant show/hide.
 - **Quick-add box** (grows *downward*) vs **full-overlay input bar** (grows *upward*) —
   both wrap and expand as you type, capped at 10 lines with caret-follow scroll.
@@ -227,9 +237,13 @@ real tasks).
 
 ## 5. Build, run, variants
 
-- **Prereqs (one-time):** `sudo apt install xorg-dev libgl1-mesa-dev libssl-dev`
-  (X11 + GL headers; OpenSSL enables HTTPS for cloud LLMs). Deps (GLFW/NanoVG/glad/
-  nlohmann-json/toml++/httplib) are fetched by CMake.
+- **Prereqs (one-time):** Linux — `sudo apt install xorg-dev libgl1-mesa-dev libssl-dev`
+  (X11 + GL headers; OpenSSL enables HTTPS for cloud LLMs). macOS — Xcode Command Line
+  Tools plus `brew install cmake ninja` and optionally `openssl@3` (CMake finds the keg
+  via `brew --prefix`). Deps (GLFW/NanoVG/glad/nlohmann-json/toml++/httplib) are fetched
+  by CMake. glad generates its loader with a Python script that needs Jinja2; if the
+  Python on `PATH` can't import it, `cmake/deps.cmake` provisions a private venv under
+  the build dir rather than touching the system Python.
 - **Dev build** (default, dev features on, debuggable): `cmake --preset dev` then
   `cmake --build build`. → `build/tasktree`.
 - **Production build** (dev-only code stripped, small + optimized): `cmake --preset prod`
@@ -257,10 +271,15 @@ for the off case (see `LlmLog.hpp`).
 - **The running app owns `tasks.json`.** It rewrites the file on every change, so editing
   the file externally while the app runs gets clobbered. To edit safely: stop the app,
   re-read, edit, restart (`tasktree stop`/`start`).
-- **X11-only.** Global hotkeys (`XGrabKey`) and the overlay assume X11 + a compositor.
+- **No Wayland.** On Linux the overlay and its hotkeys assume X11 + a compositor.
   `Alt`+drag is *not* used for panning — the window manager grabs it.
-- **Hotkey grabs** can collide with the desktop (GNOME/mutter reserves many `Super`
-  combos); the app logs any chord it fails to grab.
+- **Hotkey grabs** can collide with the desktop: GNOME/mutter reserves many `Super`
+  combos, and macOS reserves `Cmd+Space` (Spotlight) and `Ctrl+Space` (input source).
+  The app logs any chord it fails to grab.
+- **Modifier names are shared, meanings are not.** One `config.toml` works on both
+  platforms: `Super` is the Windows/Super key on X11 and **Command** on macOS, `Alt` is
+  **Option** on macOS. Chords name *physical* keys (X11 keycodes / `kVK_*` codes), so
+  they don't move with the keyboard layout.
 
 ---
 

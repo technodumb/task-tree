@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.24)   # FetchContent + FIND_PACKAGE_ARGS + SOURCE_SUBDIR
 project(tasktree LANGUAGES CXX C)       # C is needed for nanovg.c / glad
+if(APPLE)
+    # OBJCXX: our Cocoa/Carbon platform backend (.mm). OBJC: GLFW's own cocoa_*.m —
+    # without it CMake maps .m to OBJCXX and GLFW fails to compile as Objective-C++.
+    enable_language(OBJC OBJCXX)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,8 +19,13 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # only, so RelWithDebInfo stays debuggable. Ship with -DCMAKE_BUILD_TYPE=Release.
 if(NOT MSVC)
     add_compile_options(-ffunction-sections -fdata-sections)
-    add_link_options(-Wl,--gc-sections)
-    add_link_options($<$<CONFIG:Release>:-s>)
+    if(APPLE)
+        # Apple's linker spells this differently and has no -s (strip with `strip -x`).
+        add_link_options(-Wl,-dead_strip)
+    else()
+        add_link_options(-Wl,--gc-sections)
+        add_link_options($<$<CONFIG:Release>:-s>)
+    endif()
 endif()
 
 option(TASKTREE_BUILD_TESTS "Build unit tests" ON)
@@ -27,13 +37,33 @@ option(TASKTREE_DEV "Include development-only features" ON)
 
 # ---- System deps ------------------------------------------------------------
 find_package(Threads REQUIRED)
+
+# macOS has no system OpenSSL headers; point CMake at the Homebrew keg so HTTPS
+# (and therefore the cloud LLMs) works out of the box when it is installed.
+if(APPLE AND NOT DEFINED OPENSSL_ROOT_DIR)
+    find_program(BREW_EXECUTABLE brew)
+    if(BREW_EXECUTABLE)
+        execute_process(COMMAND "${BREW_EXECUTABLE}" --prefix openssl@3
+                        OUTPUT_VARIABLE _brew_openssl
+                        OUTPUT_STRIP_TRAILING_WHITESPACE
+                        ERROR_QUIET RESULT_VARIABLE _brew_rc)
+        if(_brew_rc EQUAL 0 AND EXISTS "${_brew_openssl}")
+            set(OPENSSL_ROOT_DIR "${_brew_openssl}")
+        endif()
+    endif()
+endif()
 find_package(OpenSSL) # enables HTTPS in cpp-httplib for cloud LLMs (Cerebras/OpenAI)
-find_package(X11)   # provides X11::X11 for the global-hotkey XGrabKey code
-if(NOT X11_FOUND)
-    message(FATAL_ERROR
-        "X11 development headers not found. Install them first:\n"
-        "    sudo apt install xorg-dev libgl1-mesa-dev\n"
-        "(xorg-dev gives X11/Xlib.h etc., libgl1-mesa-dev gives the GLX headers).")
+
+# X11 is the Linux/BSD window server; on macOS the platform backend is Cocoa/Carbon
+# (see src/platform/NativeWindowMac.mm + HotkeysMac.mm) and needs no system package.
+if(UNIX AND NOT APPLE)
+    find_package(X11)   # provides X11::X11 for the global-hotkey XGrabKey code
+    if(NOT X11_FOUND)
+        message(FATAL_ERROR
+            "X11 development headers not found. Install them first:\n"
+            "    sudo apt install xorg-dev libgl1-mesa-dev\n"
+            "(xorg-dev gives X11/Xlib.h etc., libgl1-mesa-dev gives the GLX headers).")
+    endif()
 endif()
 
 include(cmake/deps.cmake)
@@ -63,13 +93,24 @@ target_link_libraries(tt_io
 add_executable(tasktree
     src/main.cpp
     src/app/App.cpp
-    src/platform/PlatformX11.cpp
-    src/platform/Hotkeys.cpp
+    src/platform/PlatformGlfw.cpp
     src/render/Renderer.cpp
     src/render/nanovg_gl_impl.cpp
     src/ui/TextInput.cpp
     src/ui/DragController.cpp
     src/llm/OpenAiClassifier.cpp)
+
+# Platform backends: the overlay window hints and the global hotkey grabber are the
+# only two things GLFW cannot do portably. Exactly one pair is compiled in.
+if(APPLE)
+    target_sources(tasktree PRIVATE
+        src/platform/NativeWindowMac.mm
+        src/platform/HotkeysMac.mm)
+else()
+    target_sources(tasktree PRIVATE
+        src/platform/NativeWindowX11.cpp
+        src/platform/HotkeysX11.cpp)
+endif()
 target_include_directories(tasktree PRIVATE src)
 target_compile_definitions(tasktree PRIVATE
     GLFW_INCLUDE_NONE           # let glad own the GL headers
@@ -93,8 +134,14 @@ target_link_libraries(tasktree PRIVATE
     glfw glad_gl_core_33 nanovg
     nlohmann_json::nlohmann_json
     httplib::httplib
-    X11::X11
     Threads::Threads)
+
+if(APPLE)
+    # Cocoa for the NSWindow overlay hints, Carbon for RegisterEventHotKey.
+    target_link_libraries(tasktree PRIVATE "-framework Cocoa" "-framework Carbon")
+else()
+    target_link_libraries(tasktree PRIVATE X11::X11)
+endif()
 
 if(OpenSSL_FOUND)
     target_compile_definitions(tasktree PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT TASKTREE_HAVE_SSL)
@@ -118,4 +165,10 @@ if(TASKTREE_BUILD_TESTS)
     add_executable(store_tests tests/store_tests.cpp)
     target_link_libraries(store_tests PRIVATE tt_core tt_io sqlite3)
     add_test(NAME store_tests COMMAND store_tests)
+
+    # Hotkey parsing + the macOS key-name table. Both are header-only and pure, so
+    # this runs on every platform (the mac table is just data).
+    add_executable(hotkey_tests tests/hotkey_tests.cpp)
+    target_link_libraries(hotkey_tests PRIVATE tt_core)
+    add_test(NAME hotkey_tests COMMAND hotkey_tests)
 endif()

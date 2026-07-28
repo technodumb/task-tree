@@ -21,6 +21,7 @@ _deps/
 /tasktree
 /core_tests
 /store_tests
+/hotkey_tests
 
 # Editors
 .vscode/
