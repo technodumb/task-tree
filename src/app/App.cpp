@@ -370,15 +370,15 @@ std::string App::paletteStatus() const {
 void App::drawPaletteDropUp(const Rect& inputBox) {
     constexpr std::size_t kRows = 4;   // then a "+N more" footer
 
-    // The '/' menu is symbols only — the bar itself spells out the highlighted mode and
-    // what it does, so the list just has to be pickable.
+    // The '/' menu: symbol + what it does. The names stay out of the list — the bar shows
+    // the highlighted one, so repeating it in every row is noise.
     if (pmode_ == palette::Mode::Menu) {
         if (menuItems_.empty()) return;
         std::vector<std::string> rows;
         rows.reserve(menuItems_.size());
         for (palette::Mode m : menuItems_) {
             const palette::ModeInfo* i = palette::infoFor(m);
-            if (i) rows.push_back(std::string(1, i->prefix));
+            if (i) rows.push_back(std::string(1, i->prefix) + "   " + i->blurb);
         }
         renderer_.drawPalette(inputBox, rows, static_cast<int>(candidateIdx_), 0,
                               "↑↓ pick · Enter use · Esc cancel", paletteTint(), cfg_);
@@ -833,20 +833,21 @@ void App::drawScene(int winW, int winH, float dpr) {
             renderer_.drawDonePanel(donePanel_, forest_, doneRows_, cfg_);
         InputStyle style;
         style.editing = editingNode_ != 0;
-        // In the '/' menu the bar isn't an editor: it displays the highlighted mode's name
-        // (no caret — there's nothing to type), and the status line explains it.
+        // In the '/' menu the bar isn't an editor: it just names the highlighted mode (no
+        // caret, no argument — the drop-up carries the explanations).
         const bool menu = pmode_ == palette::Mode::Menu;
         std::string barText = input_.text();
         if (pmode_ != palette::Mode::Add) {
-            const palette::ModeInfo* info = palette::infoFor(pmode_);
+            const palette::ModeInfo* info = palette::infoFor(menu ? menuHighlight() : pmode_);
             style.tinted = true;
             style.border = paletteTint();
-            style.chip = info ? std::string(info->name) + ":" : std::string{};
-            style.placeholder = info ? info->hint : std::string{};
-            style.status = paletteStatus();
+            style.chip = info ? (menu ? std::string(info->name) : std::string(info->name) + ":")
+                              : std::string{};
             if (menu) {
-                const palette::ModeInfo* hi = palette::infoFor(menuHighlight());
-                barText = hi ? hi->name : "";
+                barText.clear();
+            } else {
+                style.placeholder = info ? info->hint : std::string{};
+                style.status = paletteStatus();
             }
         }
         const Rect box = renderer_.drawInput(winW, winH, barText, barText.size(),
