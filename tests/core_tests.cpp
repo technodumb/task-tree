@@ -290,45 +290,72 @@ int main() {
         CHECK(undos == 2, "history depth bounded to 2");
     }
 
-    { // command palette: the input bar's prefix grammar
+    { // command palette: prefix -> mode, and (mode, argument) -> action
         using namespace tt::palette;
         std::printf("[palette] grammar\n");
 
-        CHECK(parse("").kind == Kind::AddTask, "empty -> add");
-        CHECK(parse("buy milk").kind == Kind::AddTask, "plain text -> add");
-        CHECK(parse("buy milk").body == "buy milk", "add keeps the text");
-        CHECK(parse("  spaced  ").body == "spaced", "add trims");
-        // Leading space is the escape hatch for a task that starts with a prefix symbol.
-        CHECK(parse(" :not a command").kind == Kind::AddTask, "leading space escapes");
-        CHECK(parse(" :not a command").body == ":not a command", "escaped body keeps the colon");
-        CHECK(parse("12").kind == Kind::AddTask, "bare digits are still a task");
+        // A prefix names a mode; the symbol is consumed, so the bar then holds only the
+        // argument (App enters the mode; interpret() never sees the symbol again).
+        CHECK(modeForPrefix('?') == Mode::Find, "? -> find mode");
+        CHECK(modeForPrefix(':') == Mode::Select, ": -> select mode");
+        CHECK(modeForPrefix('>') == Mode::Parent, "> -> parent mode");
+        CHECK(modeForPrefix('/') == Mode::Menu, "/ -> mode menu");
+        CHECK(modeForPrefix('x') == Mode::Add, "an ordinary character is not a prefix");
+        CHECK(modeForPrefix(' ') == Mode::Add, "space is not a prefix");
 
-        CHECK(parse("?beta").kind == Kind::Find, "? -> find");
-        CHECK(parse("? beta ").query == "beta", "find query trimmed");
-        CHECK(parse("?").query.empty(), "bare ? has no query");
+        CHECK(infoFor(Mode::Find)->prefix == '?', "find's symbol");
+        CHECK(std::string(infoFor(Mode::Select)->name) == "select", "select's chip label");
+        CHECK(infoFor(Mode::Add) == nullptr, "add has no chip");
+        CHECK(modes().size() == 3, "three modes are offered in the menu");
 
-        CHECK(parse(":12").kind == Kind::SelectId, ": + digits -> select by id");
-        CHECK(parse(":12").id == 12, "select id parsed");
-        CHECK(parse(": 7 ").id == 7, "select id trims");
-        CHECK(parse(":foo").kind == Kind::SelectText, ": + text -> select by text");
-        CHECK(parse(":foo").query == "foo", "select query parsed");
-        CHECK(parse(":?12").kind == Kind::SelectText, ":? forces text even for digits");
-        CHECK(parse(":?12").query == "12", ":? keeps the digits as a query");
-        CHECK(parse(":").kind == Kind::SelectText, "bare : is an empty text pick");
-        CHECK(parse(":").query.empty() && parse(":").id == 0, "bare : targets nothing");
+        CHECK(interpret(Mode::Add, "buy milk").kind == Kind::AddTask, "add mode -> add");
+        CHECK(interpret(Mode::Add, "buy milk").body == "buy milk", "add keeps the text");
+        CHECK(interpret(Mode::Add, "  spaced  ").body == "spaced", "add trims");
+        CHECK(!interpret(Mode::Add, ":x").isCommand(), "a colon mid-text is just text");
+        CHECK(interpret(Mode::Menu, "anything").kind == Kind::AddTask, "menu acts on nothing");
 
-        CHECK(parse(">7").kind == Kind::ParentId, "> + digits -> parent by id");
-        CHECK(parse(">7").id == 7, "parent id parsed");
-        CHECK(parse(">deep work").kind == Kind::ParentText, "> + text -> parent by text");
-        CHECK(parse(">?deep").query == "deep", ">? query parsed");
-        CHECK(parse(">99999999999999999999999999").id == 0, "absurd id clamps to none");
+        CHECK(interpret(Mode::Find, "beta").kind == Kind::Find, "find mode -> find");
+        CHECK(interpret(Mode::Find, " beta ").query == "beta", "find query trimmed");
+        CHECK(interpret(Mode::Find, "").query.empty(), "empty find has no query");
 
-        CHECK(parse("?x").picksByText() && parse(":?x").picksByText() && parse(">?x").picksByText(),
-              "text modes drive the candidate list");
-        CHECK(!parse(":9").picksByText() && !parse(">9").picksByText(), "id modes don't");
-        CHECK(parse(":9").selects() && parse(":?x").selects(), "select modes flagged");
-        CHECK(parse(">9").reparents() && parse(">?x").reparents(), "parent modes flagged");
-        CHECK(!parse("plain").isCommand() && parse("?q").isCommand(), "isCommand");
+        CHECK(interpret(Mode::Select, "12").kind == Kind::SelectId, "digits -> select by id");
+        CHECK(interpret(Mode::Select, "12").id == 12, "select id parsed");
+        CHECK(interpret(Mode::Select, " 7 ").id == 7, "select id trims");
+        CHECK(interpret(Mode::Select, "foo").kind == Kind::SelectText, "text -> select by text");
+        CHECK(interpret(Mode::Select, "foo").query == "foo", "select query parsed");
+        // ':?12' as typed: ':' entered the mode, so the argument is "?12".
+        CHECK(interpret(Mode::Select, "?12").kind == Kind::SelectText, "? forces a text query");
+        CHECK(interpret(Mode::Select, "?12").query == "12", "forced query keeps the digits");
+        CHECK(interpret(Mode::Select, "").kind == Kind::SelectText, "empty select picks by text");
+        CHECK(interpret(Mode::Select, "").id == 0, "empty select targets nothing");
+
+        CHECK(interpret(Mode::Parent, "7").kind == Kind::ParentId, "digits -> parent by id");
+        CHECK(interpret(Mode::Parent, "7").id == 7, "parent id parsed");
+        CHECK(interpret(Mode::Parent, "deep work").kind == Kind::ParentText, "text -> by text");
+        CHECK(interpret(Mode::Parent, "?deep").query == "deep", "forced parent query");
+        CHECK(interpret(Mode::Parent, "99999999999999999999999999").id == 0,
+              "absurd id clamps to none");
+
+        CHECK(interpret(Mode::Find, "x").picksByText() &&
+              interpret(Mode::Select, "?x").picksByText() &&
+              interpret(Mode::Parent, "?x").picksByText(), "text modes drive the candidate list");
+        CHECK(!interpret(Mode::Select, "9").picksByText() &&
+              !interpret(Mode::Parent, "9").picksByText(), "id modes don't");
+        CHECK(interpret(Mode::Select, "9").selects() && interpret(Mode::Select, "x").selects(),
+              "select actions flagged");
+        CHECK(interpret(Mode::Parent, "9").reparents() && interpret(Mode::Parent, "x").reparents(),
+              "parent actions flagged");
+        CHECK(!interpret(Mode::Add, "plain").isCommand() && interpret(Mode::Find, "q").isCommand(),
+              "isCommand");
+
+        // The '/' menu: filter by symbol, by name, or by the description.
+        CHECK(menuMatches("").size() == 3, "empty filter lists every mode");
+        CHECK(menuMatches(">").size() == 1 && menuMatches(">")[0] == Mode::Parent,
+              "filter by symbol");
+        CHECK(menuMatches("par")[0] == Mode::Parent, "filter by name prefix");
+        CHECK(menuMatches("SELECT")[0] == Mode::Select, "filter is case-insensitive");
+        CHECK(menuMatches("highlight")[0] == Mode::Find, "filter matches the description");
+        CHECK(menuMatches("zzz").empty(), "no match -> empty menu");
     }
 
     { // command palette: match ranking (best first, deterministic)

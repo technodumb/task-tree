@@ -37,32 +37,72 @@ TaskId toId(const std::string& digits) {
 
 } // namespace
 
-Command parse(const std::string& raw) {
+const std::vector<ModeInfo>& modes() {
+    static const std::vector<ModeInfo> kModes = {
+        {Mode::Find, '?', "find", "highlight matching nodes and jump between them",
+         "text to find…"},
+        {Mode::Select, ':', "select", "select a node — its id, or text to match",
+         "node id, or text to match…"},
+        {Mode::Parent, '>', "parent", "make a node the parent of the selected one",
+         "node id, or text to match…"},
+    };
+    return kModes;
+}
+
+const ModeInfo* infoFor(Mode m) {
+    for (const ModeInfo& i : modes())
+        if (i.mode == m) return &i;
+    static const ModeInfo kMenu{Mode::Menu, '/', "mode", "pick what the bar does",
+                                "pick a mode…"};
+    return (m == Mode::Menu) ? &kMenu : nullptr;
+}
+
+Mode modeForPrefix(char c) {
+    if (c == '/') return Mode::Menu;
+    for (const ModeInfo& i : modes())
+        if (i.prefix == c) return i.mode;
+    return Mode::Add;
+}
+
+std::vector<Mode> menuMatches(const std::string& filter) {
+    std::vector<Mode> out;
+    const std::string f = lower(trim(filter));
+    for (const ModeInfo& i : modes()) {
+        const bool hit = f.empty() || (f.size() == 1 && f[0] == i.prefix) ||
+                         lower(i.name).find(f) != std::string::npos ||
+                         lower(i.blurb).find(f) != std::string::npos;
+        if (hit) out.push_back(i.mode);
+    }
+    return out;
+}
+
+Command interpret(Mode mode, const std::string& arg) {
     Command c;
-    // Empty, or the leading-space escape hatch, or no prefix at all -> plain add.
-    if (raw.empty() || raw[0] == ' ' || raw[0] == '\t' ||
-        (raw[0] != '?' && raw[0] != ':' && raw[0] != '>')) {
-        c.body = trim(raw);
-        return c;
+    switch (mode) {
+        case Mode::Add:
+            c.body = trim(arg);
+            return c;
+        case Mode::Menu:
+            return c;                      // the menu itself does nothing until Enter
+        case Mode::Find:
+            c.kind = Kind::Find;
+            c.query = trim(arg);
+            return c;
+        case Mode::Select:
+        case Mode::Parent:
+            break;
     }
 
-    const char prefix = raw[0];
-    std::string tail = raw.substr(1);
-
-    if (prefix == '?') {
-        c.kind = Kind::Find;
-        c.query = trim(tail);
-        return c;
-    }
-
-    // ':' / '>': an explicit '?' forces text mode; otherwise a numeric tail means "by id".
+    // Select / Parent: digits mean "by id", anything else is a text query. A leading '?'
+    // forces text mode, so ':?12' looks for the text "12" instead of node 12.
+    std::string tail = arg;
     const bool forcedText = !tail.empty() && tail[0] == '?';
     if (forcedText) tail.erase(0, 1);
     const std::string t = trim(tail);
     const bool byId = !forcedText && allDigits(t);
 
-    if (prefix == ':') c.kind = byId ? Kind::SelectId : Kind::SelectText;
-    else               c.kind = byId ? Kind::ParentId : Kind::ParentText;
+    if (mode == Mode::Select) c.kind = byId ? Kind::SelectId : Kind::SelectText;
+    else                      c.kind = byId ? Kind::ParentId : Kind::ParentText;
     if (byId) c.id = toId(t);
     else      c.query = t;
     return c;

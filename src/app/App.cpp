@@ -81,8 +81,9 @@ void App::hide() {
 
 void App::onChar(unsigned int codepoint) {
     if (mode_ == Mode::Hidden) return;
+    if (tryEnterMode(codepoint)) return;   // ? : > / on an empty bar: mode, not text
     input_.onChar(codepoint);
-    updatePalette();   // a leading ? / : / > re-purposes the bar as it's typed
+    updatePalette();
 }
 
 void App::onKey(int key, int action, int mods) {
@@ -96,9 +97,16 @@ void App::onKey(int key, int action, int mods) {
 
     if (key == GLFW_KEY_ESCAPE && drag_.active()) { drag_.cancel(); return; }
     if (key == GLFW_KEY_ESCAPE && editingNode_ != 0) { cancelEditing(); return; }
-    // Esc backs out of a palette command (leaving the overlay open) before it does
-    // anything else — the bar is how you got into the mode, so it's how you leave.
-    if (key == GLFW_KEY_ESCAPE && cmd_.isCommand()) { clearPalette(); return; }
+    // Esc backs out of a palette mode (leaving the overlay open) before it does anything
+    // else — the bar is how you got into the mode, so it's how you leave.
+    if (key == GLFW_KEY_ESCAPE && pmode_ != palette::Mode::Add) { clearPalette(); return; }
+    // Backspace with the argument already empty is the other way out: the prefix isn't in
+    // the text, so this is what "deleting" it means. Checked before the delete-subtree
+    // shortcut below, which also fires on Backspace with an empty bar.
+    if (key == GLFW_KEY_BACKSPACE && pmode_ != palette::Mode::Add && input_.text().empty()) {
+        clearPalette();
+        return;
+    }
     // Esc then clears a selection: a selected node can be dismissed without also closing
     // the overlay (a third Esc, with the bar empty, hides it).
     if (key == GLFW_KEY_ESCAPE && selected_ != 0 && input_.text().empty()) {
@@ -130,9 +138,10 @@ void App::onKey(int key, int action, int mods) {
         if (mode_ == Mode::Full && key == GLFW_KEY_Y) { redo(); return; }
     }
 
-    // ↑/↓ walk the candidate list while a text-picking command is active (they do nothing
-    // in the single-line field otherwise, so nothing is shadowed).
-    if (!candidates_.empty() && (key == GLFW_KEY_UP || key == GLFW_KEY_DOWN)) {
+    // ↑/↓ walk whichever drop-up is open — node candidates, or the '/' mode menu. (They do
+    // nothing in the single-line field otherwise, so nothing is shadowed.)
+    if ((key == GLFW_KEY_UP || key == GLFW_KEY_DOWN) &&
+        (!candidates_.empty() || !menuItems_.empty())) {
         movePaletteCursor(key == GLFW_KEY_DOWN ? 1 : -1);
         return;
     }
@@ -154,21 +163,50 @@ void App::onKey(int key, int action, int mods) {
 
 // ---- command palette -------------------------------------------------------
 
+bool App::tryEnterMode(unsigned int codepoint) {
+    // Prefixes only bite on an empty bar, so anything typed after a character is literal
+    // (type a space first to add a task that starts with '?', ':' or '>').
+    // Quick-add is add-only (no tree on screen for a command to act on).
+    if (mode_ != Mode::Full) return false;
+    if (codepoint > 0x7f || !input_.text().empty()) return false;
+    const char c = static_cast<char>(codepoint);
+    // Inside select/parent, '?' means "force a text query" (':?12'), so it stays literal.
+    if (c == '?' && (pmode_ == palette::Mode::Select || pmode_ == palette::Mode::Parent))
+        return false;
+    // In the menu, typed characters filter the list instead of switching modes.
+    if (pmode_ == palette::Mode::Menu) return false;
+
+    const palette::Mode m = palette::modeForPrefix(c);
+    if (m == palette::Mode::Add) return false;
+    setPaletteMode(m);
+    return true;
+}
+
+void App::setPaletteMode(palette::Mode m) {
+    pmode_ = m;
+    input_.clear();          // the prefix is the mode now; the bar holds only its argument
+    candidateIdx_ = 0;
+    updatePalette();
+}
+
 void App::updatePalette() {
-    cmd_ = palette::parse(input_.text());
+    cmd_ = palette::interpret(pmode_, input_.text());
 
     // The ranking shifts as the query changes, so the ↑/↓ cursor only survives while the
     // query text is identical (e.g. moving the caret, or switching : <-> >).
     if (cmd_.query != lastQuery_) { candidateIdx_ = 0; lastQuery_ = cmd_.query; }
 
     candidates_.clear();
+    menuItems_.clear();
     searchHits_.clear();
-    if (cmd_.picksByText() && !cmd_.query.empty()) {
+    if (pmode_ == palette::Mode::Menu) {
+        menuItems_ = palette::menuMatches(input_.text());
+    } else if (cmd_.picksByText() && !cmd_.query.empty()) {
         candidates_ = palette::rankMatches(forest_, cmd_.query);
         searchHits_.insert(candidates_.begin(), candidates_.end());
     }
-    if (candidateIdx_ >= candidates_.size())
-        candidateIdx_ = candidates_.empty() ? 0 : candidates_.size() - 1;
+    const std::size_t rows = candidates_.empty() ? menuItems_.size() : candidates_.size();
+    if (candidateIdx_ >= rows) candidateIdx_ = (rows == 0) ? 0 : rows - 1;
 
     // Preview rings, reusing the canvas vocabulary: blue = what Enter will select/jump to,
     // green = where the selection will land (same cue as a Ctrl+click reparent).
@@ -182,6 +220,7 @@ void App::updatePalette() {
 }
 
 void App::clearPalette() {
+    pmode_ = palette::Mode::Add;   // back to plain "type a task"
     input_.clear();
     candidateIdx_ = 0;
     updatePalette();
@@ -190,15 +229,16 @@ void App::clearPalette() {
 void App::enterFindMode() {
     // Ctrl+F converts THIS bar into a search bar rather than opening another field. Text
     // already typed becomes the query, so Ctrl+F after typing searches for what you typed.
-    if (input_.text().empty() || input_.text()[0] != '?')
-        input_.setText("?" + input_.text());
+    const std::string carried = (pmode_ == palette::Mode::Add) ? input_.text() : std::string{};
+    setPaletteMode(palette::Mode::Find);
+    if (!carried.empty()) { input_.setText(carried); updatePalette(); }
     input_.setFocused(true);
-    updatePalette();
 }
 
 void App::movePaletteCursor(int delta) {
-    if (candidates_.empty()) return;
-    const int n = static_cast<int>(candidates_.size());
+    const std::size_t rows = candidates_.empty() ? menuItems_.size() : candidates_.size();
+    if (rows == 0) return;
+    const int n = static_cast<int>(rows);
     int i = static_cast<int>(candidateIdx_) + delta;
     while (i < 0) i += n;          // wrap both ways: the list is short
     candidateIdx_ = static_cast<std::size_t>(i % n);
@@ -222,6 +262,12 @@ TaskId App::commandTarget() const {
 }
 
 void App::runCommand() {
+    // The '/' menu doesn't act on the tree: Enter just switches the bar into the mode the
+    // ↑/↓ cursor is on.
+    if (pmode_ == palette::Mode::Menu) {
+        if (candidateIdx_ < menuItems_.size()) setPaletteMode(menuItems_[candidateIdx_]);
+        return;
+    }
     const TaskId target = commandTarget();
     switch (cmd_.kind) {
         case palette::Kind::AddTask:
@@ -269,19 +315,20 @@ void App::revealNode(TaskId id) {
 
 Color App::paletteTint() const {
     // Same vocabulary as the canvas: amber = search rings, blue = selection ring,
-    // green = drop hint. The bar's border tells you which mode you're in.
-    switch (cmd_.kind) {
-        case palette::Kind::Find:       return {245 / 255.f, 200 / 255.f, 70 / 255.f, 0.86f};
-        case palette::Kind::SelectId:
-        case palette::Kind::SelectText: return {120 / 255.f, 175 / 255.f, 255 / 255.f, 1.f};
-        case palette::Kind::ParentId:
-        case palette::Kind::ParentText: return cfg_.dropHint;
-        case palette::Kind::AddTask:    break;
+    // green = drop hint. Violet is the mode menu, which touches nothing on canvas.
+    switch (pmode_) {
+        case palette::Mode::Find:   return {245 / 255.f, 200 / 255.f, 70 / 255.f, 0.86f};
+        case palette::Mode::Select: return {120 / 255.f, 175 / 255.f, 255 / 255.f, 1.f};
+        case palette::Mode::Parent: return cfg_.dropHint;
+        case palette::Mode::Menu:   return {190 / 255.f, 160 / 255.f, 255 / 255.f, 1.f};
+        case palette::Mode::Add:    break;
     }
     return cfg_.nodeBorder;
 }
 
 std::string App::paletteStatus() const {
+    if (pmode_ == palette::Mode::Menu)
+        return menuItems_.empty() ? "no such mode" : "↑↓ + Enter";
     const auto matches = [this] {
         if (cmd_.query.empty()) return std::string{};
         if (candidates_.empty()) return std::string("no match");
@@ -314,9 +361,24 @@ std::string App::paletteStatus() const {
 }
 
 void App::drawPaletteDropUp(const Rect& inputBox) {
-    if (candidates_.empty()) return;
     constexpr std::size_t kRows = 4;   // then a "+N more" footer
 
+    // The '/' menu lists the modes themselves: symbol, name, what it does.
+    if (pmode_ == palette::Mode::Menu) {
+        if (menuItems_.empty()) return;
+        std::vector<std::string> rows;
+        rows.reserve(menuItems_.size());
+        for (palette::Mode m : menuItems_) {
+            const palette::ModeInfo* i = palette::infoFor(m);
+            if (!i) continue;
+            rows.push_back(std::string(1, i->prefix) + "   " + i->name + " — " + i->blurb);
+        }
+        renderer_.drawPalette(inputBox, rows, static_cast<int>(candidateIdx_), 0,
+                              "↑↓ pick · Enter use this mode · Esc cancel", paletteTint(), cfg_);
+        return;
+    }
+
+    if (candidates_.empty()) return;
     // Window the list so the ↑/↓ cursor stays visible, with one row of lead-in above it.
     const std::size_t n = candidates_.size();
     std::size_t first = (candidateIdx_ > 0) ? candidateIdx_ - 1 : 0;
@@ -521,12 +583,11 @@ void App::moveOverlayToNextMonitor() {
 void App::commitInput() {
     if (editingNode_ != 0) { commitEdit(trim(input_.text())); return; }
 
-    // A leading ? / : / > makes this a palette command, not a task (app/Palette.hpp).
-    // Quick-add is add-only: a command there would have nowhere to show its result.
+    // In a palette mode the bar isn't a task at all — Enter runs the command (app/Palette.hpp).
     updatePalette();
-    if (cmd_.isCommand() && mode_ == Mode::Full) { runCommand(); return; }
+    if (pmode_ != palette::Mode::Add) { runCommand(); return; }
 
-    const std::string txt = cmd_.isCommand() ? trim(input_.text()) : cmd_.body;
+    const std::string txt = cmd_.body;
     if (txt.empty()) { if (mode_ == Mode::QuickAdd) hide(); return; }
 
     history_.snapshot(forest_);   // undo checkpoint before the add
@@ -765,9 +826,12 @@ void App::drawScene(int winW, int winH, float dpr) {
             renderer_.drawDonePanel(donePanel_, forest_, doneRows_, cfg_);
         InputStyle style;
         style.editing = editingNode_ != 0;
-        if (cmd_.isCommand()) {
+        if (pmode_ != palette::Mode::Add) {
+            const palette::ModeInfo* info = palette::infoFor(pmode_);
             style.tinted = true;
             style.border = paletteTint();
+            style.chip = info ? std::string(info->name) + ":" : std::string{};
+            style.placeholder = info ? info->hint : std::string{};
             style.status = paletteStatus();
         }
         const Rect box = renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(),

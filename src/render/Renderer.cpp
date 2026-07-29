@@ -367,13 +367,20 @@ Rect Renderer::drawInput(float screenW, float screenH, const std::string& text,
     const bool editing = style.editing;
     const float boxW = std::min(620.f, std::max(360.f, screenW * 0.5f));
     const float bx = (screenW - boxW) * 0.5f;
-    const float contentW = boxW - 2 * padX_;
     const float pad = padY_;
 
     nvgFontFaceId(vg_, font_);
     nvgFontSize(vg_, fontSize_);
     float asc = 0, desc = 0, lineH = 0;
     nvgTextMetrics(vg_, &asc, &desc, &lineH);
+
+    // A palette mode reserves a pill on the left ("find:", "parent:"); the text — and the
+    // wrap width with it — is indented past it so the two never collide.
+    const float chipTextW = style.chip.empty()
+                              ? 0.f
+                              : nvgTextBounds(vg_, 0, 0, style.chip.c_str(), end(style.chip), nullptr);
+    const float chipW = style.chip.empty() ? 0.f : chipTextW + 20.f;
+    const float contentW = boxW - 2 * padX_ - chipW;
 
     // Wrap the input into visual lines so the box grows as text is typed.
     struct Row { int start, end, next; };
@@ -416,9 +423,22 @@ Rect Renderer::drawInput(float screenW, float screenH, const std::string& text,
     const Color border = style.tinted ? style.border : (editing ? editBorder : cfg.nodeBorder);
     drawFieldChrome(bx, by, boxW, boxH, cfg, border);
 
+    // Mode pill: filled with the mode's accent, label in the same hue, vertically centred.
+    if (!style.chip.empty()) {
+        const float ch = lineH + 2.f;
+        const float cy = by + (boxH - ch) * 0.5f;
+        nvgBeginPath(vg_);
+        nvgRoundedRect(vg_, bx + padX_ - 4.f, cy, chipW - 6.f, ch, cfg.cornerRadius * 0.55f);
+        nvgFillColor(vg_, col(border, 0.20f));
+        nvgFill(vg_);
+        nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        nvgFillColor(vg_, col(border, 0.95f));
+        nvgText(vg_, bx + padX_ + 4.f, cy + ch * 0.5f, style.chip.c_str(), end(style.chip));
+    }
+
     // Text (or placeholder): the visible rows form a block centred vertically in the
     // box (the search field's balanced look), one row per wrapped line.
-    const float tx = bx + padX_;
+    const float tx = bx + padX_ + chipW;
     const float textTop = by + (boxH - shown * lineH) * 0.5f;
     nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
     if (text.empty()) {

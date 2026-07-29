@@ -143,29 +143,40 @@ snapshots, so any mutation is reversible without per-op inverse logic (v2).
 - **Undo / redo**: `Ctrl+Z` / `Ctrl+Shift+Z` (also `Ctrl+Y`) step through the `History`
   snapshot stack. Every structural mutation snapshots first; the input bar ignores these
   chords so there's no collision.
-- **Command palette (the input bar)**: a leading symbol re-purposes the one text field
-  instead of opening another (grammar + ranking: `app/Palette.hpp`, unit-tested).
+- **Command palette (the input bar)**: a symbol typed into the *empty* bar switches its
+  **mode** instead of opening another field. The symbol is **consumed** — it never appears
+  in the text; the bar grows a tinted `find:` / `select:` / `parent:` pill on the left and
+  what you type after it is just that mode's argument. Grammar + ranking live in
+  `app/Palette.hpp` (pure, unit-tested); `App` owns the side effects.
 
-  | typed | mode | Enter |
-  |---|---|---|
-  | `task text` | add (unchanged) | add the task, LLM-classified as before |
-  | `?query` | **find** (amber) | jump to the active match, stay in find mode |
-  | `:12` | **select** (blue) | select node 12 (the number is its id badge) |
-  | `:?query` / `:query` | **select by text** | select the active match |
-  | `>12` | **parent** (green) | make node 12 the parent of the selection |
-  | `>?query` / `>query` | **parent by text** | make the active match the parent |
+  | prefix | mode (accent) | argument | Enter |
+  |---|---|---|---|
+  | — | add (unchanged) | task text | add the task, LLM-classified as before |
+  | `/` | **mode menu** (violet) | filter text | switch to the highlighted mode |
+  | `?` | **find** (amber) | text | jump to the active match, stay in find |
+  | `:` | **select** (blue) | `12` or text | select node 12 / the active match |
+  | `>` | **parent** (green) | `12` or text | make it the parent of the selection |
 
-  After `:` / `>` the `?` is optional — a non-numeric tail is a text query anyway. A
-  **leading space escapes** the grammar, so `" :literal"` adds a task named `:literal`.
+  In select/parent, digits mean *by id* (the node's id badge) and anything else is a text
+  query; a leading `?` in the argument forces text (`:?12` looks for the text "12"), so the
+  `:?query` / `>?query` spellings work exactly as typed. `/` lists every mode with its
+  symbol and a one-line blurb, filterable by symbol, name or description (`/par`, `/>`,
+  `/highlight`). A prefix typed into an empty argument **switches** modes directly, so
+  `:` → `>` needs no exit. **Leaving a mode**: `Esc`, or `Backspace` on an empty argument
+  (the prefix isn't in the text, so that's what deleting it means) — both drop back to plain
+  add without closing the overlay. To add a task that *starts* with a prefix symbol, type a
+  space first (commit trims it).
+
   Text modes show a **drop-up list** above the bar (up to 4 rows of `[id] text` + "+N
-  more"); `↑`/`↓` walk it (wrapping), the bar's **border and the drop-up are tinted by
-  mode** and the active candidate is ringed on canvas — blue for select/find (what Enter
-  acts on), green for parent (where the selection lands), while every match keeps its amber
-  ring. The bar also shows a status: `7 matches`, `no match`, `node 12`, `→ child of 12`,
-  `can't move there`, `select a node first`. Targets hidden under a collapsed ancestor are
-  **revealed** (ancestors expanded) when committed; the canvas only pans if the target is
-  **off screen**, and never for a `>` move onto a visible node (that one anchors instead).
-  `Esc` backs out of the command, leaving the overlay open.
+  more"), windowed to keep the `↑`/`↓` cursor visible; the cursor wraps. Mode is legible
+  without reading the prefix because the pill, the border, the drop-up tint and the canvas
+  ring share one vocabulary: blue = what Enter acts on, green = where the selection lands,
+  amber = every match. The bar's right edge shows status: `7 matches`, `no match`,
+  `node 12`, `→ child of 12`, `can't move there`, `select a node first`. Targets hidden
+  under a collapsed ancestor are **revealed** (ancestors expanded) on commit; the canvas
+  pans only if the target is **off screen**, and never for a `>` onto a visible node (that
+  one anchors instead). `Ctrl+F` is exactly "type `?`" (carrying any text already typed
+  into the query).
 - **Collapse / expand**: nodes with children show a small disc handle on the bottom edge —
   a minus when expanded, the hidden-descendant count when collapsed. Clicking it toggles
   the node's `collapsed` flag; layout then treats it as a leaf (subtree hidden, no

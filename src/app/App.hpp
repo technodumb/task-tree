@@ -111,16 +111,20 @@ private:
     // Command palette: the input bar itself, re-purposed by a leading ? / : / > (grammar +
     // match ranking in app/Palette.hpp). Ctrl+F is just "prefix the bar with ?" — there is
     // no second field. Highlights every match on canvas and previews the pending target.
-    palette::Command cmd_;                // last parse of the input bar
+    palette::Mode pmode_ = palette::Mode::Add;  // what the bar is doing (prefix consumed)
+    palette::Command cmd_;                // resolved action for (pmode_, bar text)
     std::vector<TaskId> candidates_;      // ranked matches for a text-picking command
-    std::size_t candidateIdx_ = 0;        // which one ↑/↓ has landed on
+    std::vector<palette::Mode> menuItems_;   // rows of the '/' mode menu
+    std::size_t candidateIdx_ = 0;        // which row ↑/↓ has landed on (nodes or modes)
     std::string lastQuery_;               // query the cursor above belongs to
     std::unordered_set<TaskId> searchHits_;  // every match (amber rings)
     TaskId previewSelect_ = 0;            // ring previewing what Enter would select
     double searchPanDue_ = 0.0;           // debounced jump to the active candidate (0 = none)
-    void   updatePalette();               // reparse the bar; refresh candidates + previews
-    void   clearPalette();                // empty the bar and drop all palette state
-    void   enterFindMode();               // Ctrl+F: turn the bar into "?<current text>"
+    void   updatePalette();               // re-resolve the bar; refresh candidates + previews
+    void   clearPalette();                // empty the bar, back to plain add mode
+    void   setPaletteMode(palette::Mode m);  // switch mode, clearing the argument
+    bool   tryEnterMode(unsigned int codepoint);  // a prefix typed into an empty bar
+    void   enterFindMode();               // Ctrl+F: the same as typing '?'
     void   movePaletteCursor(int delta);  // ↑/↓ through the candidate list
     void   runCommand();                  // Enter on a palette command
     TaskId activeCandidate() const;       // candidates_[candidateIdx_] (0 if none)

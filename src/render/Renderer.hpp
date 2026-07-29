@@ -35,6 +35,7 @@ struct InputStyle {
     bool editing = false;        // in-place node text edit: selection-blue border
     bool tinted = false;         // use `border` (a palette mode) instead of the defaults
     Color border{};
+    std::string chip;            // mode name drawn as a tinted pill on the left ("find")
     std::string status;          // right-aligned + dimmed, e.g. "7 matches" / "node 12"
     std::string placeholder;     // shown when empty; empty string = the default prompt
 };
