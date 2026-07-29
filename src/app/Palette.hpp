@@ -7,7 +7,8 @@
 // an empty argument, drops back to plain add mode.
 //
 //   (none)    Add      type a task, Enter adds it (LLM-classified as before)
-//   /         Menu     list the modes; ↑/↓ + Enter picks one
+//   /         Menu     a picker: the bar shows the highlighted mode, ↑/↓ + Enter takes it
+//                      (typing a mode's symbol jumps straight there)
 //   ?         Find     highlight matches, walk them, jump to one
 //   :         Select   select a node: "12" by id, anything else by text
 //   >         Parent   make a node the parent of the selection (same two ways)
@@ -62,10 +63,6 @@ struct ModeInfo {
 const std::vector<ModeInfo>& modes();
 const ModeInfo* infoFor(Mode m);              // nullptr for Add
 Mode modeForPrefix(char c);                   // Mode::Add when `c` isn't a prefix symbol
-
-// Menu rows matching `filter` (empty = all): matches the symbol, or the name/blurb
-// case-insensitively, so "/par", "/>" and "/parent" all land on Parent.
-std::vector<Mode> menuMatches(const std::string& filter);
 
 // Resolve the pending action. `arg` is the bar text with the prefix already stripped.
 Command interpret(Mode mode, const std::string& arg);

@@ -503,8 +503,9 @@ void Renderer::drawPalette(const Rect& inputBox, const std::vector<std::string>&
 
     nvgFontFaceId(vg_, font_);
     nvgFontSize(vg_, fontSize_);
+    const float hintSize = fontSize_ * 0.72f;   // the key legend is a footnote, not content
     const float rowH = fontSize_ + 12.f;
-    const float footerH = fontSize_ + 10.f;
+    const float footerH = hintSize + 12.f;
     const float pad = 8.f;
     const float w = inputBox.w;
     const float h = rows.size() * rowH + footerH + 2 * pad;
@@ -531,15 +532,16 @@ void Renderer::drawPalette(const Rect& inputBox, const std::vector<std::string>&
     }
 
     const float fy = y + pad + rows.size() * rowH + footerH * 0.5f;
-    nvgFillColor(vg_, col(cfg.nodeText, 0.42f));
+    nvgFontSize(vg_, hintSize);
+    nvgFillColor(vg_, col(cfg.nodeText, 0.4f));
     nvgText(vg_, x + padX_, fy, hint.c_str(), end(hint));
     if (moreCount > 0) {
         const std::string more = "+" + std::to_string(moreCount) + " more";
         nvgTextAlign(vg_, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
-        nvgFillColor(vg_, col(cfg.nodeText, 0.42f));
         nvgText(vg_, x + w - padX_, fy, more.c_str(), end(more));
         nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
     }
+    nvgFontSize(vg_, fontSize_);   // leave the shared context as we found it
 }
 
 float Renderer::measureTextHeight(const std::string& text, float width) const {

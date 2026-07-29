@@ -64,18 +64,6 @@ Mode modeForPrefix(char c) {
     return Mode::Add;
 }
 
-std::vector<Mode> menuMatches(const std::string& filter) {
-    std::vector<Mode> out;
-    const std::string f = lower(trim(filter));
-    for (const ModeInfo& i : modes()) {
-        const bool hit = f.empty() || (f.size() == 1 && f[0] == i.prefix) ||
-                         lower(i.name).find(f) != std::string::npos ||
-                         lower(i.blurb).find(f) != std::string::npos;
-        if (hit) out.push_back(i.mode);
-    }
-    return out;
-}
-
 Command interpret(Mode mode, const std::string& arg) {
     Command c;
     switch (mode) {

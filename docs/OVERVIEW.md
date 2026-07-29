@@ -159,10 +159,12 @@ snapshots, so any mutation is reversible without per-op inverse logic (v2).
 
   In select/parent, digits mean *by id* (the node's id badge) and anything else is a text
   query; a leading `?` in the argument forces text (`:?12` looks for the text "12"), so the
-  `:?query` / `>?query` spellings work exactly as typed. `/` lists every mode with its
-  symbol and a one-line blurb, filterable by symbol, name or description (`/par`, `/>`,
-  `/highlight`). A prefix typed into an empty argument **switches** modes directly, so
-  `:` → `>` needs no exit. **Leaving a mode**: `Esc`, or `Backspace` on an empty argument
+  `:?query` / `>?query` spellings work exactly as typed. `/` is a **picker, not a filter**:
+  the bar displays the highlighted mode's *name* (caret hidden — there's nothing to type)
+  with its blurb as the status, the drop-up lists just the **symbols**, and the whole bar
+  takes that mode's colour so `↑`/`↓` previews what you're switching into. Typing a mode's
+  symbol jumps straight to it. A prefix typed into an empty argument **switches** modes
+  directly, so `:` → `>` needs no exit. **Leaving a mode**: `Esc`, or `Backspace` on an empty argument
   (the prefix isn't in the text, so that's what deleting it means) — both drop back to plain
   add without closing the overlay. To add a task that *starts* with a prefix symbol, type a
   space first (commit trims it).

@@ -132,6 +132,7 @@ private:
     bool   canReparent(TaskId child, TaskId newParent) const;  // shared move validity
     void   revealNode(TaskId id);         // un-collapse every ancestor so `id` is on canvas
     bool   nodeOnScreen(TaskId id) const; // its rect is at least partly inside the window
+    palette::Mode menuHighlight() const;  // mode the '/' picker is sitting on
     Color  paletteTint() const;           // per-mode accent (matches the canvas rings)
     std::string paletteStatus() const;    // "7 matches" / "node 12" / "no match" …
     void   drawPaletteDropUp(const Rect& inputBox);  // candidate list above the bar

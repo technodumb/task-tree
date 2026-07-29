@@ -348,14 +348,14 @@ int main() {
         CHECK(!interpret(Mode::Add, "plain").isCommand() && interpret(Mode::Find, "q").isCommand(),
               "isCommand");
 
-        // The '/' menu: filter by symbol, by name, or by the description.
-        CHECK(menuMatches("").size() == 3, "empty filter lists every mode");
-        CHECK(menuMatches(">").size() == 1 && menuMatches(">")[0] == Mode::Parent,
-              "filter by symbol");
-        CHECK(menuMatches("par")[0] == Mode::Parent, "filter by name prefix");
-        CHECK(menuMatches("SELECT")[0] == Mode::Select, "filter is case-insensitive");
-        CHECK(menuMatches("highlight")[0] == Mode::Find, "filter matches the description");
-        CHECK(menuMatches("zzz").empty(), "no match -> empty menu");
+        // The '/' menu is built straight from modes(): every mode has the three things the
+        // picker renders — a symbol for the list, a name for the bar, a blurb for the status.
+        for (const ModeInfo& i : modes()) {
+            CHECK(i.prefix != '\0' && i.name && i.blurb && i.hint, "mode row is complete");
+            CHECK(modeForPrefix(i.prefix) == i.mode, "prefix round-trips to its mode");
+            CHECK(infoFor(i.mode) == &i, "infoFor returns that row");
+        }
+        CHECK(infoFor(Mode::Menu) != nullptr, "the menu has a chip label of its own");
     }
 
     { // command palette: match ranking (best first, deterministic)

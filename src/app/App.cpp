@@ -173,8 +173,6 @@ bool App::tryEnterMode(unsigned int codepoint) {
     // Inside select/parent, '?' means "force a text query" (':?12'), so it stays literal.
     if (c == '?' && (pmode_ == palette::Mode::Select || pmode_ == palette::Mode::Parent))
         return false;
-    // In the menu, typed characters filter the list instead of switching modes.
-    if (pmode_ == palette::Mode::Menu) return false;
 
     const palette::Mode m = palette::modeForPrefix(c);
     if (m == palette::Mode::Add) return false;
@@ -200,7 +198,8 @@ void App::updatePalette() {
     menuItems_.clear();
     searchHits_.clear();
     if (pmode_ == palette::Mode::Menu) {
-        menuItems_ = palette::menuMatches(input_.text());
+        // The menu is a pure picker: every mode, always, in display order.
+        for (const palette::ModeInfo& i : palette::modes()) menuItems_.push_back(i.mode);
     } else if (cmd_.picksByText() && !cmd_.query.empty()) {
         candidates_ = palette::rankMatches(forest_, cmd_.query);
         searchHits_.insert(candidates_.begin(), candidates_.end());
@@ -313,22 +312,30 @@ void App::revealNode(TaskId id) {
     if (changed) { forceRelayout(); save(); }
 }
 
+palette::Mode App::menuHighlight() const {
+    return (candidateIdx_ < menuItems_.size()) ? menuItems_[candidateIdx_] : palette::Mode::Add;
+}
+
 Color App::paletteTint() const {
     // Same vocabulary as the canvas: amber = search rings, blue = selection ring,
-    // green = drop hint. Violet is the mode menu, which touches nothing on canvas.
-    switch (pmode_) {
+    // green = drop hint. In the '/' menu the bar takes the highlighted mode's colour, so
+    // ↑/↓ previews what you're about to switch into.
+    switch (pmode_ == palette::Mode::Menu ? menuHighlight() : pmode_) {
         case palette::Mode::Find:   return {245 / 255.f, 200 / 255.f, 70 / 255.f, 0.86f};
         case palette::Mode::Select: return {120 / 255.f, 175 / 255.f, 255 / 255.f, 1.f};
         case palette::Mode::Parent: return cfg_.dropHint;
-        case palette::Mode::Menu:   return {190 / 255.f, 160 / 255.f, 255 / 255.f, 1.f};
+        case palette::Mode::Menu:
         case palette::Mode::Add:    break;
     }
     return cfg_.nodeBorder;
 }
 
 std::string App::paletteStatus() const {
-    if (pmode_ == palette::Mode::Menu)
-        return menuItems_.empty() ? "no such mode" : "↑↓ + Enter";
+    // In the menu the bar names the highlighted mode, so the status explains it.
+    if (pmode_ == palette::Mode::Menu) {
+        const palette::ModeInfo* i = palette::infoFor(menuHighlight());
+        return i ? i->blurb : std::string{};
+    }
     const auto matches = [this] {
         if (cmd_.query.empty()) return std::string{};
         if (candidates_.empty()) return std::string("no match");
@@ -363,18 +370,18 @@ std::string App::paletteStatus() const {
 void App::drawPaletteDropUp(const Rect& inputBox) {
     constexpr std::size_t kRows = 4;   // then a "+N more" footer
 
-    // The '/' menu lists the modes themselves: symbol, name, what it does.
+    // The '/' menu is symbols only — the bar itself spells out the highlighted mode and
+    // what it does, so the list just has to be pickable.
     if (pmode_ == palette::Mode::Menu) {
         if (menuItems_.empty()) return;
         std::vector<std::string> rows;
         rows.reserve(menuItems_.size());
         for (palette::Mode m : menuItems_) {
             const palette::ModeInfo* i = palette::infoFor(m);
-            if (!i) continue;
-            rows.push_back(std::string(1, i->prefix) + "   " + i->name + " — " + i->blurb);
+            if (i) rows.push_back(std::string(1, i->prefix));
         }
         renderer_.drawPalette(inputBox, rows, static_cast<int>(candidateIdx_), 0,
-                              "↑↓ pick · Enter use this mode · Esc cancel", paletteTint(), cfg_);
+                              "↑↓ pick · Enter use · Esc cancel", paletteTint(), cfg_);
         return;
     }
 
@@ -826,6 +833,10 @@ void App::drawScene(int winW, int winH, float dpr) {
             renderer_.drawDonePanel(donePanel_, forest_, doneRows_, cfg_);
         InputStyle style;
         style.editing = editingNode_ != 0;
+        // In the '/' menu the bar isn't an editor: it displays the highlighted mode's name
+        // (no caret — there's nothing to type), and the status line explains it.
+        const bool menu = pmode_ == palette::Mode::Menu;
+        std::string barText = input_.text();
         if (pmode_ != palette::Mode::Add) {
             const palette::ModeInfo* info = palette::infoFor(pmode_);
             style.tinted = true;
@@ -833,9 +844,13 @@ void App::drawScene(int winW, int winH, float dpr) {
             style.chip = info ? std::string(info->name) + ":" : std::string{};
             style.placeholder = info ? info->hint : std::string{};
             style.status = paletteStatus();
+            if (menu) {
+                const palette::ModeInfo* hi = palette::infoFor(menuHighlight());
+                barText = hi ? hi->name : "";
+            }
         }
-        const Rect box = renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(),
-                                             cfg_, style);
+        const Rect box = renderer_.drawInput(winW, winH, barText, barText.size(),
+                                             caretOn() && !menu, cfg_, style);
         drawPaletteDropUp(box);
     } else if (mode_ == Mode::QuickAdd) {
         InputStyle style;
