@@ -129,6 +129,14 @@ snapshots, so any mutation is reversible without per-op inverse logic (v2).
   and re-measures/relayouts instead of adding a new task.
 - **Delete subtree**: `Delete` / `Backspace` with a node selected and the input bar empty
   removes that subtree. No confirm dialog — undo covers it.
+- **Ctrl+click reparent**: with a node selected, `Ctrl`+click another canvas node to move
+  the selection (and its subtree) in as that node's **last child** — the drag-free way to
+  restructure, and the only way to reparent across a long distance without dragging.
+  Holding `Ctrl` rings the node under the cursor green (the drop-hint colour) when it's a
+  valid target; invalid ones (the selection itself, its own descendants, its current
+  parent) show no ring and fall through to normal click behaviour. A collapsed target is
+  opened so the arriving node is visible; the move flashes root→node, glides the camera
+  there, and keeps the selection so moves can be chained. Undo-backed.
 - **Undo / redo**: `Ctrl+Z` / `Ctrl+Shift+Z` (also `Ctrl+Y`) step through the `History`
   snapshot stack. Every structural mutation snapshots first; the input bar ignores these
   chords so there's no collision.

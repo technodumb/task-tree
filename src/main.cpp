@@ -165,6 +165,8 @@ int main() {
     std::fprintf(stderr, "Pan: middle-drag or drag empty canvas. Wheel: %s (config [input] "
                          "scroll_mode). Next monitor: Ctrl+M. Double-click empty to recenter.\n",
                  cfg.scrollMode.c_str());
+    std::fprintf(stderr, "Select a node, then Ctrl+click another to make it that node's "
+                         "child. F2 edits, Delete removes, Ctrl+Z undoes.\n");
 
     // On-demand event loop: blocks (~0 CPU) when idle, wakes on input/hotkey.
     while (!glfwWindowShouldClose(win)) {

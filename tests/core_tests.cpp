@@ -155,6 +155,26 @@ int main() {
         CHECK(f.size() == before - 2, "size shrank by 2");
     }
 
+    { // Ctrl+click reparent: the selection lands as the target's LAST child, keeping the
+      // target's existing children in order. (App appends at children.size().)
+        Forest f;
+        TaskId p = f.addTask("p");
+        TaskId k1 = f.addTask("k1", p);
+        TaskId k2 = f.addTask("k2", p);
+        TaskId moved = f.addTask("moved");
+        TaskId kid = f.addTask("kid", moved);
+
+        const int last = static_cast<int>(f.get(p)->children.size());
+        CHECK(f.reparent(moved, p, last), "append-as-last-child accepted");
+        CHECK((f.get(p)->children == std::vector<TaskId>{k1, k2, moved}), "appended after k1,k2");
+        CHECK(f.get(kid)->parent == moved, "the moved node keeps its own subtree");
+        // Clamping: an out-of-range index still appends rather than failing.
+        CHECK(f.reparent(k1, p, 99), "over-large index clamps");
+        CHECK(f.get(p)->children.back() == k1, "k1 clamped to the end");
+        // The reverse move (parent under its own descendant) stays rejected.
+        CHECK(!f.reparent(p, kid, 0), "reject moving p under its own descendant");
+    }
+
     { // DONE section: markDone / restoreFromDone
         Forest f;
         TaskId a = f.addTask("a");

@@ -65,6 +65,12 @@ private:
     void redo();   // Ctrl+Shift+Z / Ctrl+Y: reapply an undone state
     void afterHistoryChange();  // shared relayout/cleanup after an undo or redo
     void deleteSelected();      // Delete/Backspace: remove the selected subtree (undoable)
+    // Ctrl+click reparent: select a node, then Ctrl+click another to move the selection
+    // (and its subtree) in as that node's last child. Drag-free alternative to dragging.
+    void   reparentSelected(TaskId newParent);   // undoable move; no-op if invalid
+    TaskId reparentTargetAt(Vec2 world) const;   // valid target under `world` (0 = none)
+    void   updateReparentCue(bool ctrlHeld);     // refresh the green target ring
+    bool   ctrlHeld() const;                     // either Ctrl key down right now
     // In-place text editing: the input bar is reused to edit an existing node's text.
     // editingNode_ != 0 routes a commit to update that node instead of adding a task.
     void startEditing(TaskId id);          // seed the input bar with the node's text
@@ -118,6 +124,7 @@ private:
     bool needsRelayout_ = true;
     TaskId selected_ = 0;   // click-selected canvas node (0 = none); drawn with a ring
     TaskId editingNode_ = 0; // node whose text the input bar is editing (0 = adding, not editing)
+    TaskId reparentTarget_ = 0; // node a Ctrl+click would reparent the selection under (0 = none)
 
     // Transient "path to the new task" flash (root -> leaf), fades over ~1.6 s.
     std::unordered_set<TaskId> highlightSet_;

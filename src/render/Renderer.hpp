@@ -68,10 +68,13 @@ public:
     // dragged node (dv.dragged) is skipped here and drawn as a ghost; the drop target
     // is highlighted. `pathHi` nodes (and edges between them) get a fading highlight
     // at intensity `pathStrength` (0 = none) — used to flash the path to a new task.
+    // `reparentTarget` (Ctrl held over a valid node) gets a green ring: the node the
+    // selection would become a child of on click.
     void drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>& rects,
                   const Config& cfg, const DragVisual& dv, Vec2 pan, float zoom,
                   const std::unordered_set<TaskId>& pathHi, float pathStrength,
-                  const std::unordered_set<TaskId>& searchHits, TaskId selected = 0);
+                  const std::unordered_set<TaskId>& searchHits, TaskId selected = 0,
+                  TaskId reparentTarget = 0);
 
     // Search bar (top-centre) shown while Ctrl+F search is active.
     void drawSearchBar(float screenW, const std::string& query, std::size_t caretByte,

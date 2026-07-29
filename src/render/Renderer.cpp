@@ -203,7 +203,8 @@ void Renderer::drawCollapseHandle(const Rect& node, bool collapsed, int hiddenCo
 void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>& rects,
                         const Config& cfg, const DragVisual& dv, Vec2 pan, float zoom,
                         const std::unordered_set<TaskId>& pathHi, float pathStrength,
-                        const std::unordered_set<TaskId>& searchHits, TaskId selected) {
+                        const std::unordered_set<TaskId>& searchHits, TaskId selected,
+                        TaskId reparentTarget) {
     nvgSave(vg_);
     nvgTranslate(vg_, pan.x, pan.y);  // screen = pan + zoom * world
     nvgScale(vg_, zoom, zoom);
@@ -309,6 +310,18 @@ void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>&
             nvgRoundedRect(vg_, r->x - 5.f, r->y - 5.f, r->w + 10.f, r->h + 10.f, cfg.cornerRadius + 5.f);
             nvgStrokeColor(vg_, nvgRGBA(120, 175, 255, 255));
             nvgStrokeWidth(vg_, 2.5f);
+            nvgStroke(vg_);
+        }
+    }
+
+    // Ctrl+click reparent cue: ring the node the selection would move under, in the same
+    // green as the drag drop-hint so "this is where it lands" reads the same either way.
+    if (reparentTarget != 0 && reparentTarget != selected) {
+        if (const Rect* r = rectOf(reparentTarget)) {
+            nvgBeginPath(vg_);
+            nvgRoundedRect(vg_, r->x - 5.f, r->y - 5.f, r->w + 10.f, r->h + 10.f, cfg.cornerRadius + 5.f);
+            nvgStrokeColor(vg_, col(cfg.dropHint));
+            nvgStrokeWidth(vg_, 3.f);
             nvgStroke(vg_);
         }
     }

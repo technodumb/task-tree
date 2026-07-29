@@ -69,6 +69,7 @@ void App::hide() {
     input_.clear();
     editingNode_ = 0;
     selected_ = 0;
+    reparentTarget_ = 0;
     drag_.cancel();
     cancelPanAnim();
     exitSearch();
@@ -84,6 +85,12 @@ void App::onChar(unsigned int codepoint) {
 }
 
 void App::onKey(int key, int action, int mods) {
+    // Ctrl is the reparent modifier: while it's held with a node selected, the node under
+    // the cursor is ringed green as the pending new parent. Handled before the release
+    // guard below so the cue also clears when Ctrl comes back up.
+    if (key == GLFW_KEY_LEFT_CONTROL || key == GLFW_KEY_RIGHT_CONTROL)
+        updateReparentCue(action != GLFW_RELEASE);
+
     if (action == GLFW_RELEASE || mode_ == Mode::Hidden) return;
 
     if (key == GLFW_KEY_ESCAPE && drag_.active()) { drag_.cancel(); return; }
@@ -92,6 +99,7 @@ void App::onKey(int key, int action, int mods) {
     // selected node can be dismissed without also closing the overlay.
     if (key == GLFW_KEY_ESCAPE && selected_ != 0 && !searching_ && input_.text().empty()) {
         selected_ = 0;
+        reparentTarget_ = 0;
         return;
     }
     // F2, or Enter on a selected node with an empty input bar, edits that node's text.
@@ -227,6 +235,18 @@ void App::onMouseButton(int button, int action, int mods) {
             pinned_ = !pinned_;
             return;
         }
+        // Ctrl+click a canvas node: move the selected subtree in as that node's last
+        // child. Tested before the double-click and collapse-handle paths so a quick
+        // chain of Ctrl+clicks can't be read as a double-click (which marks a node DONE).
+        if ((mods & GLFW_MOD_CONTROL) && selected_ != 0 && !pointInPanel(mouse_)) {
+            const TaskId target = reparentTargetAt(worldMouse());
+            if (target != 0) {
+                reparentSelected(target);
+                lastClickTime_ = 0.0;   // this click doesn't arm a double-click
+                lastClickPos_ = mouse_;
+                return;
+            }
+        }
         // Double-click (same spot, within 400 ms).
         const double t = glfwGetTime();
         const bool dbl = (t - lastClickTime_ < 0.40) &&
@@ -256,6 +276,7 @@ void App::onMouseButton(int button, int action, int mods) {
             } else {
                 cancelPanAnim();
                 selected_ = 0;   // pressing empty canvas clears the selection
+                reparentTarget_ = 0;
                 panning_ = true; panGrab_ = mouse_; panOrigin_ = pan_; // drag empty bg to pan
             }
         }
@@ -287,6 +308,7 @@ void App::onCursorPos(double x, double y) {
             doneHover_ = false;                              // 17% out AND off the panel
     }
     if (drag_.active()) drag_.update(worldMouse(), forest_, rects_, params_);
+    else                updateReparentCue(ctrlHeld());
 }
 
 void App::onCursorEnter(bool entered) {
@@ -569,7 +591,7 @@ void App::drawScene(int winW, int winH, float dpr) {
             else highlightSet_.clear();
         }
         renderer_.drawTree(forest_, drawRects, cfg_, dv, pan_, zoom_, highlightSet_, hi, searchHits_,
-                           selected_);
+                           selected_, reparentTarget_);
         if (donePanel_.visible)
             renderer_.drawDonePanel(donePanel_, forest_, doneRows_, cfg_);
         if (searching_)
@@ -769,6 +791,46 @@ void App::redo() {
     afterHistoryChange();
 }
 
+bool App::ctrlHeld() const {
+    GLFWwindow* w = platform_.window();
+    return glfwGetKey(w, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+           glfwGetKey(w, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+}
+
+TaskId App::reparentTargetAt(Vec2 world) const {
+    if (selected_ == 0 || !forest_.exists(selected_)) return 0;
+    const TaskId id = hitTest(world);
+    if (id == 0 || id == selected_) return 0;
+    const Task* sel = forest_.get(selected_);
+    if (sel && sel->parent == id) return 0;                // already this node's child
+    if (forest_.isDescendantOf(id, selected_)) return 0;    // would make a cycle
+    return id;
+}
+
+void App::updateReparentCue(bool ctrl) {
+    reparentTarget_ = (ctrl && mode_ == Mode::Full && !drag_.active() && !pointInPanel(mouse_))
+                          ? reparentTargetAt(worldMouse())
+                          : 0;
+}
+
+void App::reparentSelected(TaskId newParent) {
+    const TaskId child = selected_;
+    if (child == 0 || !forest_.exists(child) || !forest_.exists(newParent)) return;
+    if (drag_.active()) drag_.cancel();
+    const int index = static_cast<int>(forest_.get(newParent)->children.size()); // append last
+    Forest before = forest_;
+    if (!forest_.reparent(child, newParent, index)) return;  // self/cycle rejected by the model
+    // A collapsed parent would swallow the node it just received: open it so the move shows.
+    forest_.get(newParent)->collapsed = false;
+    history_.record(std::move(before));
+    reparentTarget_ = 0;      // the target is now the parent -> no longer a valid target
+    forceRelayout();
+    flashPath(child);         // flash root -> moved node so the new position is obvious
+    focusNode_ = child;       // and glide the camera to it
+    if (searching_) updateSearchMatches();
+    save();
+}
+
 void App::startEditing(TaskId id) {
     const Task* t = forest_.get(id);
     if (!t) return;
@@ -802,6 +864,7 @@ void App::deleteSelected() {
     history_.snapshot(forest_);          // undo checkpoint before removal
     const TaskId victim = selected_;
     selected_ = 0;
+    reparentTarget_ = 0;
     doneExpanded_.erase(victim);
     forest_.removeSubtree(victim);       // removes the node and its whole subtree
     forceRelayout();
@@ -812,6 +875,7 @@ void App::deleteSelected() {
 void App::afterHistoryChange() {
     drag_.cancel();
     focusNode_ = 0;
+    reparentTarget_ = 0;
     if (!forest_.exists(selected_)) selected_ = 0;  // don't keep a ring on a vanished node
     forceRelayout();
     if (searching_) updateSearchMatches();  // hit set may reference now-removed/added nodes
