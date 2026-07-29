@@ -70,6 +70,7 @@ void App::hide() {
     editingNode_ = 0;
     selected_ = 0;
     reparentTarget_ = 0;
+    anchorNode_ = 0;
     drag_.cancel();
     cancelPanAnim();
     exitSearch();
@@ -547,6 +548,18 @@ void App::drawScene(int winW, int winH, float dpr) {
     if (params_.centerWidth != cw) { params_.centerWidth = cw; needsRelayout_ = true; }
     relayoutIfNeeded();
 
+    // Anchored relayout (Ctrl+click reparent): the fresh rects have re-packed the tree, so
+    // put the anchored node back where it was on screen by shifting the camera the same
+    // amount the node moved. The cursor keeps pointing at it, ready for the next Ctrl+click.
+    if (anchorNode_ != 0) {
+        if (auto it = rects_.find(anchorNode_); it != rects_.end()) {
+            cancelPanAnim();   // an instant correction, not a glide
+            pan_ = {anchorScreen_.x - zoom_ * it->second.cx(),
+                    anchorScreen_.y - zoom_ * it->second.cy()};
+        }
+        anchorNode_ = 0;
+    }
+
     // Debounced search auto-pan: once typing settles, bring the nearest match into view.
     if (searching_ && searchPanDue_ != 0.0 && glfwGetTime() >= searchPanDue_) {
         searchPanDue_ = 0.0;
@@ -818,6 +831,13 @@ void App::reparentSelected(TaskId newParent) {
     if (child == 0 || !forest_.exists(child) || !forest_.exists(newParent)) return;
     if (drag_.active()) drag_.cancel();
     const int index = static_cast<int>(forest_.get(newParent)->children.size()); // append last
+    // Pin the new parent to where it is right now (pre-move screen position). The relayout
+    // this move triggers re-packs the tree; drawScene shifts the camera to compensate so
+    // this node — the one under the cursor — does not visibly move.
+    if (auto it = rects_.find(newParent); it != rects_.end()) {
+        anchorNode_ = newParent;
+        anchorScreen_ = {pan_.x + zoom_ * it->second.cx(), pan_.y + zoom_ * it->second.cy()};
+    }
     Forest before = forest_;
     if (!forest_.reparent(child, newParent, index)) return;  // self/cycle rejected by the model
     // A collapsed parent would swallow the node it just received: open it so the move shows.
@@ -826,9 +846,8 @@ void App::reparentSelected(TaskId newParent) {
     reparentTarget_ = 0;      // the target is now the parent -> no longer a valid target
     forceRelayout();
     flashPath(child);         // flash root -> moved node so the new position is obvious
-    // Deliberately no focusNode_/pan here: this flow is aim-and-click, so the canvas must
-    // stay put — the node you just Ctrl+clicked has to remain under the cursor for chained
-    // moves, and a camera glide would yank the next target out from under it.
+    // No focusNode_ glide in this flow: it's aim-and-click, so instead of centring anything
+    // we hold the clicked parent still (anchorNode_ above) and let the tree re-pack around it.
     if (searching_) updateSearchMatches();
     save();
 }

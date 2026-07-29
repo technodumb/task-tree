@@ -135,10 +135,12 @@ snapshots, so any mutation is reversible without per-op inverse logic (v2).
   Holding `Ctrl` rings the node under the cursor green (the drop-hint colour) when it's a
   valid target; invalid ones (the selection itself, its own descendants, its current
   parent) show no ring and fall through to normal click behaviour. A collapsed target is
-  opened so the arriving node is visible, and the move flashes root→node. **No camera pan
-  in this flow** (unlike add/search): it's aim-and-click, so the canvas stays put and the
-  node under the cursor keeps its place — the selection is kept too, so moves chain.
-  Undo-backed.
+  opened so the arriving node is visible, and the move flashes root→node. **The clicked
+  parent is held still** (unlike add/search, which glide the camera to the node): the move
+  re-packs the tree, so `anchorNode_`/`anchorScreen_` record its pre-move screen position
+  and the next relayout in `drawScene` shifts `pan_` to put it back exactly there. The
+  cursor therefore still points at it — and the selection is kept — so Ctrl+clicks chain
+  without re-aiming. Undo-backed.
 - **Undo / redo**: `Ctrl+Z` / `Ctrl+Shift+Z` (also `Ctrl+Y`) step through the `History`
   snapshot stack. Every structural mutation snapshots first; the input bar ignores these
   chords so there's no collision.

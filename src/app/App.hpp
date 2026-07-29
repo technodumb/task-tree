@@ -126,6 +126,12 @@ private:
     TaskId editingNode_ = 0; // node whose text the input bar is editing (0 = adding, not editing)
     TaskId reparentTarget_ = 0; // node a Ctrl+click would reparent the selection under (0 = none)
 
+    // "Hold this node still" anchor, consumed by the next relayout in drawScene: pan_ is
+    // shifted so `anchorNode_` lands back on `anchorScreen_`. A Ctrl+click reparent re-packs
+    // the tree, which would otherwise slide the clicked parent out from under the cursor.
+    TaskId anchorNode_ = 0;
+    Vec2   anchorScreen_;
+
     // Transient "path to the new task" flash (root -> leaf), fades over ~1.6 s.
     std::unordered_set<TaskId> highlightSet_;
     double highlightUntil_ = 0.0;
