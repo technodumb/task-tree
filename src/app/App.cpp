@@ -826,7 +826,9 @@ void App::reparentSelected(TaskId newParent) {
     reparentTarget_ = 0;      // the target is now the parent -> no longer a valid target
     forceRelayout();
     flashPath(child);         // flash root -> moved node so the new position is obvious
-    focusNode_ = child;       // and glide the camera to it
+    // Deliberately no focusNode_/pan here: this flow is aim-and-click, so the canvas must
+    // stay put — the node you just Ctrl+clicked has to remain under the cursor for chained
+    // moves, and a camera glide would yank the next target out from under it.
     if (searching_) updateSearchMatches();
     save();
 }
