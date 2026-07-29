@@ -444,7 +444,7 @@ Rect Renderer::drawInput(float screenW, float screenH, const std::string& text,
     if (text.empty()) {
         const char* ph = !style.placeholder.empty() ? style.placeholder.c_str()
                        : editing ? "Edit text — Enter to save, Esc to cancel"
-                                 : "Type a task, or ? find  : select  > parent…";
+                                 : "Type a task, or / for other modes…";
         nvgFillColor(vg_, col(cfg.nodeText, 0.4f));
         nvgText(vg_, tx, textTop, ph, nullptr);
     } else {
