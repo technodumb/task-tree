@@ -2,6 +2,7 @@
 // Built by CMake as the `core_tests` CTest target; also compilable standalone:
 //   g++ -std=c++17 -I ../src core_tests.cpp ../src/model/Forest.cpp ../src/layout/TidyLayout.cpp
 #include "app/DevRoute.hpp"
+#include "app/Palette.hpp"
 #include "layout/TidyLayout.hpp"
 #include "model/History.hpp"
 #include "model/Task.hpp"
@@ -287,6 +288,75 @@ int main() {
         int undos = 0;
         while (hk.undo(k)) ++undos;
         CHECK(undos == 2, "history depth bounded to 2");
+    }
+
+    { // command palette: the input bar's prefix grammar
+        using namespace tt::palette;
+        std::printf("[palette] grammar\n");
+
+        CHECK(parse("").kind == Kind::AddTask, "empty -> add");
+        CHECK(parse("buy milk").kind == Kind::AddTask, "plain text -> add");
+        CHECK(parse("buy milk").body == "buy milk", "add keeps the text");
+        CHECK(parse("  spaced  ").body == "spaced", "add trims");
+        // Leading space is the escape hatch for a task that starts with a prefix symbol.
+        CHECK(parse(" :not a command").kind == Kind::AddTask, "leading space escapes");
+        CHECK(parse(" :not a command").body == ":not a command", "escaped body keeps the colon");
+        CHECK(parse("12").kind == Kind::AddTask, "bare digits are still a task");
+
+        CHECK(parse("?beta").kind == Kind::Find, "? -> find");
+        CHECK(parse("? beta ").query == "beta", "find query trimmed");
+        CHECK(parse("?").query.empty(), "bare ? has no query");
+
+        CHECK(parse(":12").kind == Kind::SelectId, ": + digits -> select by id");
+        CHECK(parse(":12").id == 12, "select id parsed");
+        CHECK(parse(": 7 ").id == 7, "select id trims");
+        CHECK(parse(":foo").kind == Kind::SelectText, ": + text -> select by text");
+        CHECK(parse(":foo").query == "foo", "select query parsed");
+        CHECK(parse(":?12").kind == Kind::SelectText, ":? forces text even for digits");
+        CHECK(parse(":?12").query == "12", ":? keeps the digits as a query");
+        CHECK(parse(":").kind == Kind::SelectText, "bare : is an empty text pick");
+        CHECK(parse(":").query.empty() && parse(":").id == 0, "bare : targets nothing");
+
+        CHECK(parse(">7").kind == Kind::ParentId, "> + digits -> parent by id");
+        CHECK(parse(">7").id == 7, "parent id parsed");
+        CHECK(parse(">deep work").kind == Kind::ParentText, "> + text -> parent by text");
+        CHECK(parse(">?deep").query == "deep", ">? query parsed");
+        CHECK(parse(">99999999999999999999999999").id == 0, "absurd id clamps to none");
+
+        CHECK(parse("?x").picksByText() && parse(":?x").picksByText() && parse(">?x").picksByText(),
+              "text modes drive the candidate list");
+        CHECK(!parse(":9").picksByText() && !parse(">9").picksByText(), "id modes don't");
+        CHECK(parse(":9").selects() && parse(":?x").selects(), "select modes flagged");
+        CHECK(parse(">9").reparents() && parse(">?x").reparents(), "parent modes flagged");
+        CHECK(!parse("plain").isCommand() && parse("?q").isCommand(), "isCommand");
+    }
+
+    { // command palette: match ranking (best first, deterministic)
+        using namespace tt::palette;
+        std::printf("[palette] ranking\n");
+        Forest f;
+        TaskId alpha = f.addTask("alpha beta");    // match at 6
+        TaskId beta  = f.addTask("beta");          // match at 0, shortest
+        TaskId gamma = f.addTask("gamma beta");    // match at 6, same length as alpha
+        TaskId betas = f.addTask("beta gamma");    // match at 0, longer than "beta"
+        TaskId done  = f.addTask("beta done");
+        f.markDone(done);                          // DONE isn't on the canvas
+
+        auto r = rankMatches(f, "beta");
+        CHECK(r.size() == 4, "DONE nodes excluded from matches");
+        CHECK(r[0] == beta, "shortest prefix match ranks first");
+        CHECK(r[1] == betas, "other prefix match next");
+        CHECK(std::find(r.begin(), r.end(), done) == r.end(), "the done node is absent");
+        // pos 6 for both; equal length -> smaller id wins, so ordering is stable.
+        CHECK(r[2] == std::min(alpha, gamma) && r[3] == std::max(alpha, gamma),
+              "equal-rank matches ordered by id");
+
+        CHECK(rankMatches(f, "BETA").size() == 4, "matching is case-insensitive");
+        CHECK(rankMatches(f, "beta", 2).size() == 2, "limit respected");
+        CHECK(rankMatches(f, "beta", 2)[0] == beta, "limit keeps the best");
+        CHECK(rankMatches(f, "").empty(), "empty query matches nothing");
+        CHECK(rankMatches(f, "   ").empty(), "whitespace query matches nothing");
+        CHECK(rankMatches(f, "zzz").empty(), "no false matches");
     }
 
     std::printf("\n%d checks, %d failures\n", g_checks, g_fail);

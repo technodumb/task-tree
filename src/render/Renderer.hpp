@@ -28,6 +28,17 @@ struct DragVisual {
     bool   showPreviewEdge = false;
 };
 
+// How the input bar is dressed. It doubles as the command palette, so its border is
+// tinted per mode (find / select / parent) and it can show a right-aligned status.
+struct InputStyle {
+    bool quickAdd = false;       // centred box instead of the bottom bar
+    bool editing = false;        // in-place node text edit: selection-blue border
+    bool tinted = false;         // use `border` (a palette mode) instead of the defaults
+    Color border{};
+    std::string status;          // right-aligned + dimmed, e.g. "7 matches" / "node 12"
+    std::string placeholder;     // shown when empty; empty string = the default prompt
+};
+
 // Geometry for the DONE side panel (screen coordinates), computed by App.
 struct DonePanelLayout {
     bool  visible = false;
@@ -76,15 +87,19 @@ public:
                   const std::unordered_set<TaskId>& searchHits, TaskId selected = 0,
                   TaskId reparentTarget = 0);
 
-    // Search bar (top-centre) shown while Ctrl+F search is active.
-    void drawSearchBar(float screenW, const std::string& query, std::size_t caretByte,
-                       bool caretOn, int matchCount, const Config& cfg);
-
-    // The input widget. In quick-add mode it's a centred box with a drop shadow;
-    // otherwise a bar at the bottom of the overlay.
-    void drawInput(float screenW, float screenH, const std::string& text,
+    // The input widget. In quick-add mode it's a centred box with a drop shadow; otherwise
+    // a bar at the bottom of the overlay. Returns the box rect so callers can stack UI on
+    // top of it (the palette drop-up) without recomputing the wrapped height.
+    Rect drawInput(float screenW, float screenH, const std::string& text,
                    std::size_t caretByte, bool caretOn, const Config& cfg,
-                   bool quickAddMode, bool editing = false);
+                   const InputStyle& style);
+
+    // Command-palette drop-up: candidate rows in a card sitting directly above the input
+    // box, best match first. `activeRow` is the ↑/↓ cursor, `moreCount` renders "+N more",
+    // `hint` is the dimmed key legend on the footer line, `tint` matches the bar's border.
+    void drawPalette(const Rect& inputBox, const std::vector<std::string>& rows, int activeRow,
+                     int moreCount, const std::string& hint, const Color& tint,
+                     const Config& cfg);
 
     // The DONE side panel: a floating rounded card (drop shadow + subtle border, dark
     // surface with green accents), a header with title + count badge + pin toggle, and a
@@ -115,6 +130,8 @@ private:
 
     // Blinking text caret: a vertical bar of caretHeight(), centred on centerY at x.
     void drawCaret(float x, float centerY, const Config& cfg) const;
+    // `s` shortened with a trailing ellipsis until it fits `maxW` (palette rows are one line).
+    std::string fitText(const std::string& s, float maxW) const;
     // Caret height, sized between the text glyphs and the field box (used by both fields).
     float caretHeight() const { return fontSize_ * 1.5f; }
 

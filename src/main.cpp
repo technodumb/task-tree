@@ -167,6 +167,9 @@ int main() {
                  cfg.scrollMode.c_str());
     std::fprintf(stderr, "Select a node, then Ctrl+click another to make it that node's "
                          "child. F2 edits, Delete removes, Ctrl+Z undoes.\n");
+    std::fprintf(stderr, "Input bar doubles as a command palette: '?text' find, ':12' select "
+                         "node 12, ':?text' select by text, '>12' / '>?text' reparent the "
+                         "selection under it (Ctrl+F = '?').\n");
 
     // On-demand event loop: blocks (~0 CPU) when idle, wakes on input/hotkey.
     while (!glfwWindowShouldClose(win)) {

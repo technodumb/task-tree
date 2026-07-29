@@ -41,7 +41,8 @@ include(cmake/deps.cmake)
 # ---- Pure core library (no external deps -> fast, unit-testable) ------------
 add_library(tt_core STATIC
     src/model/Forest.cpp
-    src/layout/TidyLayout.cpp)
+    src/layout/TidyLayout.cpp
+    src/app/Palette.cpp)
 target_include_directories(tt_core PUBLIC src)
 
 # ---- I/O library (persistence + config) ------------------------------------

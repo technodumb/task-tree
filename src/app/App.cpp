@@ -48,8 +48,8 @@ void App::toggleOverlay() {
         hide();
     } else {
         mode_ = Mode::Full;
-        input_.clear();
         editingNode_ = 0;
+        clearPalette();          // empty bar, no stale command state
         input_.setFocused(true);
         platform_.showOverlay();
     }
@@ -57,8 +57,8 @@ void App::toggleOverlay() {
 
 void App::showQuickAdd() {
     mode_ = Mode::QuickAdd;
-    input_.clear();
     editingNode_ = 0;
+    clearPalette();
     input_.setFocused(true);
     platform_.showOverlay();
 }
@@ -73,7 +73,7 @@ void App::hide() {
     anchorNode_ = 0;
     drag_.cancel();
     cancelPanAnim();
-    exitSearch();
+    clearPalette();
     platform_.hideOverlay();
 }
 
@@ -81,8 +81,8 @@ void App::hide() {
 
 void App::onChar(unsigned int codepoint) {
     if (mode_ == Mode::Hidden) return;
-    if (searching_) { search_.onChar(codepoint); updateSearchMatches(); }
-    else            input_.onChar(codepoint);
+    input_.onChar(codepoint);
+    updatePalette();   // a leading ? / : / > re-purposes the bar as it's typed
 }
 
 void App::onKey(int key, int action, int mods) {
@@ -96,32 +96,33 @@ void App::onKey(int key, int action, int mods) {
 
     if (key == GLFW_KEY_ESCAPE && drag_.active()) { drag_.cancel(); return; }
     if (key == GLFW_KEY_ESCAPE && editingNode_ != 0) { cancelEditing(); return; }
-    // Esc clears a selection first (only when it isn't needed for the field): so a
-    // selected node can be dismissed without also closing the overlay.
-    if (key == GLFW_KEY_ESCAPE && selected_ != 0 && !searching_ && input_.text().empty()) {
+    // Esc backs out of a palette command (leaving the overlay open) before it does
+    // anything else — the bar is how you got into the mode, so it's how you leave.
+    if (key == GLFW_KEY_ESCAPE && cmd_.isCommand()) { clearPalette(); return; }
+    // Esc then clears a selection: a selected node can be dismissed without also closing
+    // the overlay (a third Esc, with the bar empty, hides it).
+    if (key == GLFW_KEY_ESCAPE && selected_ != 0 && input_.text().empty()) {
         selected_ = 0;
         reparentTarget_ = 0;
         return;
     }
     // F2, or Enter on a selected node with an empty input bar, edits that node's text.
-    if (!searching_ && editingNode_ == 0 && selected_ != 0 && forest_.exists(selected_)) {
+    if (editingNode_ == 0 && selected_ != 0 && forest_.exists(selected_)) {
         const bool enterEmpty = (key == GLFW_KEY_ENTER || key == GLFW_KEY_KP_ENTER) &&
                                 input_.text().empty();
         if (key == GLFW_KEY_F2 || enterEmpty) { startEditing(selected_); return; }
     }
 
-    TextInput& field = searching_ ? search_ : input_;
-
     if (mods & GLFW_MOD_CONTROL) {
         if (key == GLFW_KEY_V) {
             if (const char* clip = glfwGetClipboardString(platform_.window())) {
-                field.insert(clip);
-                if (searching_) updateSearchMatches();
+                input_.insert(clip);
+                updatePalette();
             }
             return;
         }
-        if (key == GLFW_KEY_M) { moveOverlayToNextMonitor(); return; }        // next monitor
-        if (key == GLFW_KEY_F && mode_ == Mode::Full) { toggleSearch(); return; } // find
+        if (key == GLFW_KEY_M) { moveOverlayToNextMonitor(); return; }          // next monitor
+        if (key == GLFW_KEY_F && mode_ == Mode::Full) { enterFindMode(); return; } // find
         if (mode_ == Mode::Full && key == GLFW_KEY_Z) {   // undo / redo
             if (mods & GLFW_MOD_SHIFT) redo(); else undo();
             return;
@@ -129,15 +130,10 @@ void App::onKey(int key, int action, int mods) {
         if (mode_ == Mode::Full && key == GLFW_KEY_Y) { redo(); return; }
     }
 
-    if (searching_) {
-        switch (search_.onKey(key, mods)) {
-            case TextInput::Action::Cancel: exitSearch(); break;
-            case TextInput::Action::Submit: // Enter: jump to the nearest match now, keep searching
-                focusNode_ = nearestSearchHit(lastWinW_, lastWinH_);
-                searchPanDue_ = 0.0; // Enter pre-empts the pending debounced pan
-                break;
-            case TextInput::Action::None: updateSearchMatches(); break;
-        }
+    // ↑/↓ walk the candidate list while a text-picking command is active (they do nothing
+    // in the single-line field otherwise, so nothing is shadowed).
+    if (!candidates_.empty() && (key == GLFW_KEY_UP || key == GLFW_KEY_DOWN)) {
+        movePaletteCursor(key == GLFW_KEY_DOWN ? 1 : -1);
         return;
     }
 
@@ -152,56 +148,204 @@ void App::onKey(int key, int action, int mods) {
     switch (input_.onKey(key, mods)) {
         case TextInput::Action::Submit: commitInput(); break;
         case TextInput::Action::Cancel: hide(); break;
-        case TextInput::Action::None:   break;
+        case TextInput::Action::None:   updatePalette(); break;  // editing keys change the parse
     }
 }
 
-void App::toggleSearch() {
-    searching_ = !searching_;
-    search_.clear();
-    searchHits_.clear();
-    searchPanDue_ = 0.0;
-    search_.setFocused(searching_);
-}
+// ---- command palette -------------------------------------------------------
 
-void App::exitSearch() {
-    searching_ = false;
-    search_.clear();
-    searchHits_.clear();
-    searchPanDue_ = 0.0;
-}
+void App::updatePalette() {
+    cmd_ = palette::parse(input_.text());
 
-void App::updateSearchMatches() {
+    // The ranking shifts as the query changes, so the ↑/↓ cursor only survives while the
+    // query text is identical (e.g. moving the caret, or switching : <-> >).
+    if (cmd_.query != lastQuery_) { candidateIdx_ = 0; lastQuery_ = cmd_.query; }
+
+    candidates_.clear();
     searchHits_.clear();
-    searchPanDue_ = 0.0;
-    std::string q = search_.text();
-    for (char& c : q) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    if (q.empty()) return;
-    for (const auto& [id, t] : forest_.nodes) {
-        if (forest_.isInDoneSection(id)) continue; // only canvas nodes are on screen
-        std::string lt = t.text;
-        for (char& c : lt) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        if (lt.find(q) != std::string::npos) searchHits_.insert(id);
+    if (cmd_.picksByText() && !cmd_.query.empty()) {
+        candidates_ = palette::rankMatches(forest_, cmd_.query);
+        searchHits_.insert(candidates_.begin(), candidates_.end());
     }
-    // Live-highlight is immediate; panning waits a beat so it doesn't chase every keystroke.
-    if (!searchHits_.empty()) searchPanDue_ = glfwGetTime() + kSearchDebounce;
+    if (candidateIdx_ >= candidates_.size())
+        candidateIdx_ = candidates_.empty() ? 0 : candidates_.size() - 1;
+
+    // Preview rings, reusing the canvas vocabulary: blue = what Enter will select/jump to,
+    // green = where the selection will land (same cue as a Ctrl+click reparent).
+    const TaskId target = commandTarget();
+    previewSelect_ = (cmd_.selects() || cmd_.kind == palette::Kind::Find) ? target : 0;
+    reparentTarget_ = (cmd_.reparents() && canReparent(selected_, target)) ? target : 0;
+
+    // Bring the target into view — but only if it isn't already on screen, and only after
+    // typing settles, so the canvas doesn't lurch on every keystroke.
+    searchPanDue_ = (target != 0 && !nodeOnScreen(target)) ? glfwGetTime() + kSearchDebounce : 0.0;
 }
 
-// The matching node whose centre is closest to the current viewport centre, so the
-// auto-pan makes the least jarring camera move. 0 if there are no matches on screen.
-TaskId App::nearestSearchHit(int winW, int winH) const {
-    const float vcx = (winW * 0.5f - pan_.x) / zoom_;
-    const float vcy = (winH * 0.5f - pan_.y) / zoom_;
-    TaskId best = 0;
-    float bestD2 = std::numeric_limits<float>::max();
-    for (TaskId id : searchHits_) {
-        auto it = rects_.find(id);
-        if (it == rects_.end()) continue;
-        const float dx = it->second.cx() - vcx, dy = it->second.cy() - vcy;
-        const float d2 = dx * dx + dy * dy;
-        if (d2 < bestD2) { bestD2 = d2; best = id; }
+void App::clearPalette() {
+    input_.clear();
+    candidateIdx_ = 0;
+    updatePalette();
+}
+
+void App::enterFindMode() {
+    // Ctrl+F converts THIS bar into a search bar rather than opening another field. Text
+    // already typed becomes the query, so Ctrl+F after typing searches for what you typed.
+    if (input_.text().empty() || input_.text()[0] != '?')
+        input_.setText("?" + input_.text());
+    input_.setFocused(true);
+    updatePalette();
+}
+
+void App::movePaletteCursor(int delta) {
+    if (candidates_.empty()) return;
+    const int n = static_cast<int>(candidates_.size());
+    int i = static_cast<int>(candidateIdx_) + delta;
+    while (i < 0) i += n;          // wrap both ways: the list is short
+    candidateIdx_ = static_cast<std::size_t>(i % n);
+    const TaskId target = commandTarget();
+    previewSelect_ = (cmd_.selects() || cmd_.kind == palette::Kind::Find) ? target : 0;
+    reparentTarget_ = (cmd_.reparents() && canReparent(selected_, target)) ? target : 0;
+    // Stepping is a deliberate move, so follow it immediately (no debounce) — but stay put
+    // when the candidate is already on screen.
+    searchPanDue_ = 0.0;
+    if (target != 0 && !nodeOnScreen(target)) focusNode_ = target;
+}
+
+TaskId App::activeCandidate() const {
+    return candidates_.empty() ? 0 : candidates_[candidateIdx_];
+}
+
+TaskId App::commandTarget() const {
+    if (cmd_.kind == palette::Kind::SelectId || cmd_.kind == palette::Kind::ParentId)
+        return (forest_.exists(cmd_.id) && !forest_.isInDoneSection(cmd_.id)) ? cmd_.id : 0;
+    return activeCandidate();
+}
+
+void App::runCommand() {
+    const TaskId target = commandTarget();
+    switch (cmd_.kind) {
+        case palette::Kind::AddTask:
+            return;
+        case palette::Kind::Find:
+            // Jump to the active match and stay in find mode (the query is kept, so ↑/↓
+            // can keep walking) — the same feel as the old Ctrl+F bar.
+            if (target != 0) {
+                revealNode(target);
+                focusNode_ = target;
+            }
+            searchPanDue_ = 0.0;
+            return;
+        case palette::Kind::SelectId:
+        case palette::Kind::SelectText:
+            if (target == 0) return;          // no such node / no match: leave the bar alone
+            selected_ = target;
+            revealNode(target);
+            if (!nodeOnScreen(target)) focusNode_ = target;
+            clearPalette();
+            return;
+        case palette::Kind::ParentId:
+        case palette::Kind::ParentText:
+            if (!canReparent(selected_, target)) return;   // inert rather than surprising
+            revealNode(target);
+            reparentSelected(target);         // undo + anchor + flash all live in there
+            clearPalette();
+            return;
     }
-    return best;
+}
+
+void App::revealNode(TaskId id) {
+    // Expand every collapsed ancestor, otherwise the node we just selected/moved to would
+    // sit inside a hidden subtree with no rect — no ring, nothing to pan to.
+    bool changed = false;
+    const Task* t = forest_.get(id);
+    for (std::size_t steps = 0; t && t->parent != kNoParent && steps <= forest_.size(); ++steps) {
+        Task* p = forest_.get(t->parent);
+        if (!p) break;
+        if (p->collapsed) { p->collapsed = false; changed = true; }
+        t = p;
+    }
+    if (changed) { forceRelayout(); save(); }
+}
+
+Color App::paletteTint() const {
+    // Same vocabulary as the canvas: amber = search rings, blue = selection ring,
+    // green = drop hint. The bar's border tells you which mode you're in.
+    switch (cmd_.kind) {
+        case palette::Kind::Find:       return {245 / 255.f, 200 / 255.f, 70 / 255.f, 0.86f};
+        case palette::Kind::SelectId:
+        case palette::Kind::SelectText: return {120 / 255.f, 175 / 255.f, 255 / 255.f, 1.f};
+        case palette::Kind::ParentId:
+        case palette::Kind::ParentText: return cfg_.dropHint;
+        case palette::Kind::AddTask:    break;
+    }
+    return cfg_.nodeBorder;
+}
+
+std::string App::paletteStatus() const {
+    const auto matches = [this] {
+        if (cmd_.query.empty()) return std::string{};
+        if (candidates_.empty()) return std::string("no match");
+        return std::to_string(candidates_.size()) +
+               (candidates_.size() == 1 ? " match" : " matches");
+    };
+    switch (cmd_.kind) {
+        case palette::Kind::Find:
+            return matches();
+        case palette::Kind::SelectText:
+            return matches();
+        case palette::Kind::SelectId:
+            if (cmd_.id == 0) return "id?";
+            return commandTarget() != 0 ? "node " + std::to_string(cmd_.id)
+                                        : "no node " + std::to_string(cmd_.id);
+        case palette::Kind::ParentId:
+        case palette::Kind::ParentText: {
+            if (selected_ == 0) return "select a node first";
+            const TaskId target = commandTarget();
+            if (cmd_.kind == palette::Kind::ParentId && cmd_.id == 0) return "id?";
+            if (target == 0) return cmd_.kind == palette::Kind::ParentId
+                                  ? "no node " + std::to_string(cmd_.id) : matches();
+            if (!canReparent(selected_, target)) return "can't move there";
+            return "→ child of " + std::to_string(target);
+        }
+        case palette::Kind::AddTask:
+            break;
+    }
+    return {};
+}
+
+void App::drawPaletteDropUp(const Rect& inputBox) {
+    if (candidates_.empty()) return;
+    constexpr std::size_t kRows = 4;   // then a "+N more" footer
+
+    // Window the list so the ↑/↓ cursor stays visible, with one row of lead-in above it.
+    const std::size_t n = candidates_.size();
+    std::size_t first = (candidateIdx_ > 0) ? candidateIdx_ - 1 : 0;
+    if (n > kRows) first = std::min(first, n - kRows);
+    else           first = 0;
+    const std::size_t shown = std::min(kRows, n - first);
+
+    std::vector<std::string> rows;
+    rows.reserve(shown);
+    for (std::size_t i = first; i < first + shown; ++i) {
+        const Task* t = forest_.get(candidates_[i]);
+        rows.push_back("[" + std::to_string(candidates_[i]) + "]  " + (t ? t->text : std::string{}));
+    }
+
+    const char* hint = cmd_.reparents() ? "↑↓ pick · Enter make parent · Esc cancel"
+                     : cmd_.selects()   ? "↑↓ pick · Enter select · Esc cancel"
+                                        : "↑↓ walk · Enter jump · Esc close";
+    renderer_.drawPalette(inputBox, rows, static_cast<int>(candidateIdx_ - first),
+                          static_cast<int>(n - (first + shown)), hint, paletteTint(), cfg_);
+}
+
+bool App::nodeOnScreen(TaskId id) const {
+    auto it = rects_.find(id);
+    if (it == rects_.end()) return false;   // hidden under a collapsed ancestor
+    const Rect& r = it->second;
+    const float x0 = pan_.x + zoom_ * r.x, y0 = pan_.y + zoom_ * r.y;
+    const float x1 = x0 + zoom_ * r.w, y1 = y0 + zoom_ * r.h;
+    return x1 > 0.f && y1 > 0.f && x0 < static_cast<float>(lastWinW_) &&
+           y0 < static_cast<float>(lastWinH_);
 }
 
 void App::onMouseButton(int button, int action, int mods) {
@@ -288,6 +432,8 @@ void App::onMouseButton(int button, int action, int mods) {
             Forest before = forest_;   // snapshot only if the drop actually reparents
             if (drag_.drop(forest_)) { history_.record(std::move(before)); forceRelayout(); save(); }
             selected_ = node;          // clicking (or dragging) a node selects it
+            // A pending '>' command targets the selection, so its preview needs the new one.
+            if (cmd_.isCommand()) updatePalette();
         }
     }
 }
@@ -375,7 +521,12 @@ void App::moveOverlayToNextMonitor() {
 void App::commitInput() {
     if (editingNode_ != 0) { commitEdit(trim(input_.text())); return; }
 
-    const std::string txt = trim(input_.text());
+    // A leading ? / : / > makes this a palette command, not a task (app/Palette.hpp).
+    // Quick-add is add-only: a command there would have nowhere to show its result.
+    updatePalette();
+    if (cmd_.isCommand() && mode_ == Mode::Full) { runCommand(); return; }
+
+    const std::string txt = cmd_.isCommand() ? trim(input_.text()) : cmd_.body;
     if (txt.empty()) { if (mode_ == Mode::QuickAdd) hide(); return; }
 
     history_.snapshot(forest_);   // undo checkpoint before the add
@@ -560,10 +711,11 @@ void App::drawScene(int winW, int winH, float dpr) {
         anchorNode_ = 0;
     }
 
-    // Debounced search auto-pan: once typing settles, bring the nearest match into view.
-    if (searching_ && searchPanDue_ != 0.0 && glfwGetTime() >= searchPanDue_) {
+    // Debounced palette pan: once typing settles, bring the command's target into view.
+    if (searchPanDue_ != 0.0 && glfwGetTime() >= searchPanDue_) {
         searchPanDue_ = 0.0;
-        focusNode_ = nearestSearchHit(winW, winH);
+        const TaskId target = commandTarget();
+        if (target != 0 && !nodeOnScreen(target)) focusNode_ = target;
     }
 
     // Pan to bring a just-added / just-reparented / searched node into view (centre-ish,
@@ -603,18 +755,28 @@ void App::drawScene(int winW, int winH, float dpr) {
             if (now < highlightUntil_) hi = static_cast<float>((highlightUntil_ - now) / kFlashDuration);
             else highlightSet_.clear();
         }
+        // While a palette command is pending, the blue ring previews what Enter will act on
+        // rather than the current selection (for '>' the selection keeps its own ring and
+        // the target gets the green one).
+        const TaskId ringSel = previewSelect_ != 0 ? previewSelect_ : selected_;
         renderer_.drawTree(forest_, drawRects, cfg_, dv, pan_, zoom_, highlightSet_, hi, searchHits_,
-                           selected_, reparentTarget_);
+                           ringSel, reparentTarget_);
         if (donePanel_.visible)
             renderer_.drawDonePanel(donePanel_, forest_, doneRows_, cfg_);
-        if (searching_)
-            renderer_.drawSearchBar(winW, search_.text(), search_.caret(), caretOn(),
-                                    (int)searchHits_.size(), cfg_);
-        else
-            renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(), cfg_, false,
-                                editingNode_ != 0);
+        InputStyle style;
+        style.editing = editingNode_ != 0;
+        if (cmd_.isCommand()) {
+            style.tinted = true;
+            style.border = paletteTint();
+            style.status = paletteStatus();
+        }
+        const Rect box = renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(),
+                                             cfg_, style);
+        drawPaletteDropUp(box);
     } else if (mode_ == Mode::QuickAdd) {
-        renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(), cfg_, true);
+        InputStyle style;
+        style.quickAdd = true;
+        renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(), cfg_, style);
     }
     renderer_.endFrame();
 }
@@ -785,7 +947,7 @@ bool App::caretOn() const {
 double App::desiredTimeout() const {
     if (drag_.active()) return 0.0;        // poll for smooth drag
     if (panAnimActive_) return 1.0 / 60.0; // ~60fps while the camera glides to a node
-    if (searching_ && searchPanDue_ != 0.0) // wake exactly when the debounced pan is due
+    if (searchPanDue_ != 0.0)              // wake exactly when the debounced pan is due
         return std::max(0.0, searchPanDue_ - glfwGetTime());
     if (!highlightSet_.empty() && glfwGetTime() < highlightUntil_) return 0.03; // animate flash
     if (mode_ != Mode::Hidden) return 0.5; // caret blink while visible
@@ -810,14 +972,19 @@ bool App::ctrlHeld() const {
            glfwGetKey(w, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
 }
 
+// Shared by the Ctrl+click cue and the palette's '>' commands, so mouse and keyboard
+// reject exactly the same moves.
+bool App::canReparent(TaskId child, TaskId newParent) const {
+    if (child == 0 || newParent == 0 || child == newParent) return false;
+    if (!forest_.exists(child) || !forest_.exists(newParent)) return false;
+    if (forest_.isInDoneSection(newParent)) return false;        // never attach to DONE
+    if (forest_.get(child)->parent == newParent) return false;   // already this node's child
+    return !forest_.isDescendantOf(newParent, child);            // no cycles
+}
+
 TaskId App::reparentTargetAt(Vec2 world) const {
-    if (selected_ == 0 || !forest_.exists(selected_)) return 0;
     const TaskId id = hitTest(world);
-    if (id == 0 || id == selected_) return 0;
-    const Task* sel = forest_.get(selected_);
-    if (sel && sel->parent == id) return 0;                // already this node's child
-    if (forest_.isDescendantOf(id, selected_)) return 0;    // would make a cycle
-    return id;
+    return canReparent(selected_, id) ? id : 0;
 }
 
 void App::updateReparentCue(bool ctrl) {
@@ -828,15 +995,20 @@ void App::updateReparentCue(bool ctrl) {
 
 void App::reparentSelected(TaskId newParent) {
     const TaskId child = selected_;
-    if (child == 0 || !forest_.exists(child) || !forest_.exists(newParent)) return;
+    if (!canReparent(child, newParent)) return;
     if (drag_.active()) drag_.cancel();
     const int index = static_cast<int>(forest_.get(newParent)->children.size()); // append last
     // Pin the new parent to where it is right now (pre-move screen position). The relayout
     // this move triggers re-packs the tree; drawScene shifts the camera to compensate so
-    // this node — the one under the cursor — does not visibly move.
-    if (auto it = rects_.find(newParent); it != rects_.end()) {
+    // this node — the one under the cursor — does not visibly move. If the parent isn't on
+    // screen at all (a '>' palette command can name a far-away node) there's nothing to hold
+    // still, so glide to it instead: otherwise the move happens out of sight.
+    if (nodeOnScreen(newParent)) {
+        const Rect& r = rects_.at(newParent);
         anchorNode_ = newParent;
-        anchorScreen_ = {pan_.x + zoom_ * it->second.cx(), pan_.y + zoom_ * it->second.cy()};
+        anchorScreen_ = {pan_.x + zoom_ * r.cx(), pan_.y + zoom_ * r.cy()};
+    } else {
+        focusNode_ = newParent;
     }
     Forest before = forest_;
     if (!forest_.reparent(child, newParent, index)) return;  // self/cycle rejected by the model
@@ -846,9 +1018,6 @@ void App::reparentSelected(TaskId newParent) {
     reparentTarget_ = 0;      // the target is now the parent -> no longer a valid target
     forceRelayout();
     flashPath(child);         // flash root -> moved node so the new position is obvious
-    // No focusNode_ glide in this flow: it's aim-and-click, so instead of centring anything
-    // we hold the clicked parent still (anchorNode_ above) and let the tree re-pack around it.
-    if (searching_) updateSearchMatches();
     save();
 }
 
@@ -889,7 +1058,7 @@ void App::deleteSelected() {
     doneExpanded_.erase(victim);
     forest_.removeSubtree(victim);       // removes the node and its whole subtree
     forceRelayout();
-    if (searching_) updateSearchMatches();
+    updatePalette();                     // candidates may name nodes that just vanished
     save();
 }
 
@@ -899,7 +1068,7 @@ void App::afterHistoryChange() {
     reparentTarget_ = 0;
     if (!forest_.exists(selected_)) selected_ = 0;  // don't keep a ring on a vanished node
     forceRelayout();
-    if (searching_) updateSearchMatches();  // hit set may reference now-removed/added nodes
+    updatePalette();   // candidates/previews may reference now-removed or restored nodes
     save();
 }
 

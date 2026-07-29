@@ -34,19 +34,21 @@ changes stay in the pure, unit-tested core.
 ---
 
 ## Deferred — interaction & motion
-- **Keyboard-first operation (the big interaction item).** Full mouse-free flow needs a
-  proper *canvas focus* vs *input focus* model (today the input bar always holds keyboard
-  focus in the overlay). Once that exists:
-  - **Select** a node by typing its id (vimium-style), or step focus with arrows —
-    **up/down climb the tree** (to parent / first child), **left/right cycle siblings**.
-  - **Reparent by id**: a command like "move N under M" (type the two ids) that calls
-    `Forest::reparent`, then relayout. (v2 already has the mouse half of this: select,
-    then Ctrl+click the new parent — `App::reparentSelected`. A keyboard path can reuse it.)
+- **Keyboard-first operation (the big interaction item).** The **command palette** (`?` /
+  `:` / `>` in the input bar — `app/Palette.hpp`) covers most of this *without* needing a
+  canvas-focus model: commands are typed in the bar, which already owns keyboard focus, so
+  select-by-id (`:12`), select-by-text (`:?foo`) and reparent (`>12`, `>?foo`) are done.
+  What's left genuinely needs focus-on-canvas:
+  - **Step focus with arrows** — **up/down climb the tree** (to parent / first child),
+    **left/right cycle siblings**. (`↑`/`↓` are currently the palette's candidate cursor,
+    so a canvas-focus mode would have to claim them only when the bar is empty.)
   - **Move the selected node** with modified arrows (Shift+arrows) — promote to the parent's
-    level, demote under a sibling, or reorder among siblings.
-  - **Keyboard-only add**: Enter to add a child of the focused/selected node.
-  v2 ships single-node click-selection, and Ctrl+click reparenting on top of it, as the
-  first steps toward this.
+    level, demote under a sibling, or reorder among siblings. Note the palette only appends
+    (last child); ordering among siblings is still mouse-only, and drag is append-only too.
+  - **Keyboard-only add**: Enter to add a child of the focused/selected node (today Enter on
+    a selection edits it; a `+` palette prefix would fit the grammar).
+  - **More palette verbs** as the need appears: `!` status cycle, `#` done/restore,
+    multi-select, `>>` insert-between (the classifier's `parent_of` move).
 - **Auto-align animation.** Tween node positions on relayout with easing instead of
   snapping (the camera glide already added for search/new-node pans is the pattern —
   extend it to per-node `rects_` interpolation). Keep previous + target `rects_`, ease-out

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "app/Config.hpp"
+#include "app/Palette.hpp"
 #include "layout/Geometry.hpp"
 #include "layout/TidyLayout.hpp"
 #include "llm/IClassifier.hpp"
@@ -107,15 +108,29 @@ private:
     LayoutParams params_;
     History history_;   // undo/redo snapshots of forest_
 
-    // Search (Ctrl+F in the full overlay): live-highlight matching canvas nodes.
-    bool searching_ = false;
-    TextInput search_;
-    std::unordered_set<TaskId> searchHits_;
-    void toggleSearch();
-    void exitSearch();
-    void updateSearchMatches();
-    TaskId nearestSearchHit(int winW, int winH) const; // match closest to the view centre
-    double searchPanDue_ = 0.0; // debounce: auto-pan to nearest match at this time (0 = none)
+    // Command palette: the input bar itself, re-purposed by a leading ? / : / > (grammar +
+    // match ranking in app/Palette.hpp). Ctrl+F is just "prefix the bar with ?" — there is
+    // no second field. Highlights every match on canvas and previews the pending target.
+    palette::Command cmd_;                // last parse of the input bar
+    std::vector<TaskId> candidates_;      // ranked matches for a text-picking command
+    std::size_t candidateIdx_ = 0;        // which one ↑/↓ has landed on
+    std::string lastQuery_;               // query the cursor above belongs to
+    std::unordered_set<TaskId> searchHits_;  // every match (amber rings)
+    TaskId previewSelect_ = 0;            // ring previewing what Enter would select
+    double searchPanDue_ = 0.0;           // debounced jump to the active candidate (0 = none)
+    void   updatePalette();               // reparse the bar; refresh candidates + previews
+    void   clearPalette();                // empty the bar and drop all palette state
+    void   enterFindMode();               // Ctrl+F: turn the bar into "?<current text>"
+    void   movePaletteCursor(int delta);  // ↑/↓ through the candidate list
+    void   runCommand();                  // Enter on a palette command
+    TaskId activeCandidate() const;       // candidates_[candidateIdx_] (0 if none)
+    TaskId commandTarget() const;         // the node the current command points at (0 = none)
+    bool   canReparent(TaskId child, TaskId newParent) const;  // shared move validity
+    void   revealNode(TaskId id);         // un-collapse every ancestor so `id` is on canvas
+    bool   nodeOnScreen(TaskId id) const; // its rect is at least partly inside the window
+    Color  paletteTint() const;           // per-mode accent (matches the canvas rings)
+    std::string paletteStatus() const;    // "7 matches" / "node 12" / "no match" …
+    void   drawPaletteDropUp(const Rect& inputBox);  // candidate list above the bar
 
     std::unordered_map<TaskId, Size> sizes_;
     std::unordered_map<TaskId, Rect> rects_;        // current layout

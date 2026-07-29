@@ -360,9 +360,11 @@ void Renderer::drawCaret(float x, float centerY, const Config& cfg) const {
     nvgStroke(vg_);
 }
 
-void Renderer::drawInput(float screenW, float screenH, const std::string& text,
+Rect Renderer::drawInput(float screenW, float screenH, const std::string& text,
                          std::size_t caretByte, bool caretOn, const Config& cfg,
-                         bool quickAddMode, bool editing) {
+                         const InputStyle& style) {
+    const bool quickAddMode = style.quickAdd;
+    const bool editing = style.editing;
     const float boxW = std::min(620.f, std::max(360.f, screenW * 0.5f));
     const float bx = (screenW - boxW) * 0.5f;
     const float contentW = boxW - 2 * padX_;
@@ -408,10 +410,11 @@ void Renderer::drawInput(float screenW, float screenH, const std::string& text,
     // bottom anchored -> grows UP.
     const float by = quickAddMode ? (screenH - boxH) * 0.5f : (screenH - 40.f - boxH);
 
-    // Same chrome as the search field; only the border colour differs (subtle node
-    // border when adding, selection-blue when editing an existing node, amber for search).
+    // One field, several jobs — only the border colour says which: subtle node border when
+    // adding, selection-blue when editing a node, and the palette tint in command modes.
     const Color editBorder{120 / 255.f, 175 / 255.f, 255 / 255.f, 1.f};
-    drawFieldChrome(bx, by, boxW, boxH, cfg, editing ? editBorder : cfg.nodeBorder);
+    const Color border = style.tinted ? style.border : (editing ? editBorder : cfg.nodeBorder);
+    drawFieldChrome(bx, by, boxW, boxH, cfg, border);
 
     // Text (or placeholder): the visible rows form a block centred vertically in the
     // box (the search field's balanced look), one row per wrapped line.
@@ -419,10 +422,11 @@ void Renderer::drawInput(float screenW, float screenH, const std::string& text,
     const float textTop = by + (boxH - shown * lineH) * 0.5f;
     nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
     if (text.empty()) {
+        const char* ph = !style.placeholder.empty() ? style.placeholder.c_str()
+                       : editing ? "Edit text — Enter to save, Esc to cancel"
+                                 : "Type a task, or ? find  : select  > parent…";
         nvgFillColor(vg_, col(cfg.nodeText, 0.4f));
-        nvgText(vg_, tx, textTop,
-                editing ? "Edit text — Enter to save, Esc to cancel" : "Type a task, press Enter…",
-                nullptr);
+        nvgText(vg_, tx, textTop, ph, nullptr);
     } else {
         nvgFillColor(vg_, col(cfg.nodeText));
         float ty = textTop;
@@ -441,47 +445,80 @@ void Renderer::drawInput(float screenW, float screenH, const std::string& text,
                                 text.c_str() + cb, nullptr);
         drawCaret(tx + adv, lineTop + (asc - desc) * 0.5f, cfg);
     }
+
+    // Palette status ("7 matches", "node 12", "no match"), right-aligned on the first row.
+    // Commands are short, but skip it if this row's text would run into it anyway.
+    if (!style.status.empty()) {
+        const float sw = nvgTextBounds(vg_, 0, 0, style.status.c_str(), end(style.status), nullptr);
+        const float used = rows[firstRow].end > rows[firstRow].start
+                             ? nvgTextBounds(vg_, 0, 0, text.c_str() + rows[firstRow].start,
+                                             text.c_str() + rows[firstRow].end, nullptr)
+                             : 0.f;
+        if (used + sw + 24.f < contentW) {
+            nvgTextAlign(vg_, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
+            nvgFillColor(vg_, col(cfg.nodeText, 0.5f));
+            nvgText(vg_, bx + boxW - padX_, textTop, style.status.c_str(), end(style.status));
+            nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+        }
+    }
+    return {bx, by, boxW, boxH};
 }
 
-void Renderer::drawSearchBar(float screenW, const std::string& query, std::size_t caretByte,
-                             bool caretOn, int matchCount, const Config& cfg) {
-    const float boxW = std::min(560.f, std::max(360.f, screenW * 0.5f));
-    const float boxH = fontSize_ + 2 * padY_ + 8.f;
-    const float bx = (screenW - boxW) * 0.5f;
-    const float by = 48.f;                    // top-centre, out of the way of the tree
+std::string Renderer::fitText(const std::string& s, float maxW) const {
+    if (nvgTextBounds(vg_, 0, 0, s.c_str(), end(s), nullptr) <= maxW) return s;
+    std::string out = s;
+    while (!out.empty()) {
+        // Trim whole code points so a multi-byte glyph is never cut in half.
+        do { out.pop_back(); } while (!out.empty() && (static_cast<unsigned char>(out.back()) & 0xC0) == 0x80);
+        const std::string probe = out + "…";
+        if (nvgTextBounds(vg_, 0, 0, probe.c_str(), end(probe), nullptr) <= maxW) return probe;
+    }
+    return out;
+}
 
-    // Same chrome as the input field; the amber border (matching the node rings) is the
-    // only difference.
-    const Color amber{245 / 255.f, 200 / 255.f, 70 / 255.f, 220 / 255.f};
-    drawFieldChrome(bx, by, boxW, boxH, cfg, amber);
+void Renderer::drawPalette(const Rect& inputBox, const std::vector<std::string>& rows,
+                           int activeRow, int moreCount, const std::string& hint,
+                           const Color& tint, const Config& cfg) {
+    if (rows.empty()) return;
 
     nvgFontFaceId(vg_, font_);
     nvgFontSize(vg_, fontSize_);
-    nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-    const float ty = by + boxH * 0.5f;
-    const float lx = bx + padX_;
-    nvgFillColor(vg_, col(cfg.nodeText, 0.5f));
-    const float lw = nvgTextBounds(vg_, 0, 0, "Find ", nullptr, nullptr);
-    nvgText(vg_, lx, ty, "Find ", nullptr);
-    const float tx = lx + lw;
+    const float rowH = fontSize_ + 12.f;
+    const float footerH = fontSize_ + 10.f;
+    const float pad = 8.f;
+    const float w = inputBox.w;
+    const float h = rows.size() * rowH + footerH + 2 * pad;
+    const float x = inputBox.x;
+    const float y = inputBox.y - h - 10.f;   // drops UP out of the bar
 
-    if (query.empty()) {
-        nvgFillColor(vg_, col(cfg.nodeText, 0.35f));
-        nvgText(vg_, tx, ty, "search nodes…", nullptr);
-    } else {
-        nvgFillColor(vg_, col(cfg.nodeText));
-        nvgText(vg_, tx, ty, query.c_str(), end(query));
-        const std::string mc = std::to_string(matchCount) + (matchCount == 1 ? " match" : " matches");
-        nvgTextAlign(vg_, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
-        nvgFillColor(vg_, col(cfg.nodeText, 0.55f));
-        nvgText(vg_, bx + boxW - padX_, ty, mc.c_str(), nullptr);
+    drawFieldChrome(x, y, w, h, cfg, tint);
+
+    const float contentW = w - 2 * padX_;
+    nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        const float ry = y + pad + i * rowH;
+        const bool active = static_cast<int>(i) == activeRow;
+        if (active) {
+            // The ↑/↓ cursor: a tinted band, same hue as the border and the canvas ring.
+            nvgBeginPath(vg_);
+            nvgRoundedRect(vg_, x + 4.f, ry, w - 8.f, rowH, cfg.cornerRadius * 0.6f);
+            nvgFillColor(vg_, col(tint, 0.16f));
+            nvgFill(vg_);
+        }
+        const std::string line = fitText(rows[i], contentW);
+        nvgFillColor(vg_, col(cfg.nodeText, active ? 1.f : 0.62f));
+        nvgText(vg_, x + padX_, ry + rowH * 0.5f, line.c_str(), end(line));
     }
 
-    if (caretOn) {
-        const std::string prefix = query.substr(0, std::min(caretByte, query.size()));
-        const float adv = prefix.empty() ? 0.f
-                        : nvgTextBounds(vg_, 0, 0, prefix.c_str(), end(prefix), nullptr);
-        drawCaret(tx + adv, ty, cfg);   // ty is the text's vertical centre
+    const float fy = y + pad + rows.size() * rowH + footerH * 0.5f;
+    nvgFillColor(vg_, col(cfg.nodeText, 0.42f));
+    nvgText(vg_, x + padX_, fy, hint.c_str(), end(hint));
+    if (moreCount > 0) {
+        const std::string more = "+" + std::to_string(moreCount) + " more";
+        nvgTextAlign(vg_, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
+        nvgFillColor(vg_, col(cfg.nodeText, 0.42f));
+        nvgText(vg_, x + w - padX_, fy, more.c_str(), end(more));
+        nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
     }
 }
 

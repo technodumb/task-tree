@@ -46,6 +46,7 @@ render/    NanoVG drawing (nodes/edges/UI)
 ui/        TextInput (line editor) + DragController
 layout/    PURE tidy-tree engine + geometry  ← no GL, unit-tested
 model/     Task/Forest + JSON persistence     ← PURE, unit-tested
+app/       state machine, config, Palette     ← Palette (bar grammar) is PURE, unit-tested
 llm/       Pluggable classifier               ← behind IClassifier
 app/       App state machine, Config, paths, ttd routing
 ```
@@ -113,10 +114,8 @@ snapshots, so any mutation is reversible without per-op inverse logic (v2).
   **Zoom**: `Ctrl+scroll` (or plain scroll — config `scroll_mode` = `zoom`/`pan`/`off`),
   about the cursor. **Double-click empty space** recenters + resets zoom.
 - **Multi-monitor**: `Ctrl+M` moves the overlay to the next monitor.
-- **Search**: `Ctrl+F` opens a search bar; typing live-highlights matching canvas nodes
-  (amber ring, case-insensitive substring). Shortly after typing settles (~0.2 s debounce)
-  the canvas auto-pans to the match nearest the current view centre (least jarring move);
-  Enter jumps to the nearest match immediately; Esc exits.
+- **Search**: part of the command palette below — `?query` in the input bar (`Ctrl+F` is
+  a shortcut for typing that `?`). There is only ever **one** text field.
 - **Path flash**: adding a task briefly highlights root→new-node; the canvas also **pans
   to bring the new node into view**.
 
@@ -144,6 +143,29 @@ snapshots, so any mutation is reversible without per-op inverse logic (v2).
 - **Undo / redo**: `Ctrl+Z` / `Ctrl+Shift+Z` (also `Ctrl+Y`) step through the `History`
   snapshot stack. Every structural mutation snapshots first; the input bar ignores these
   chords so there's no collision.
+- **Command palette (the input bar)**: a leading symbol re-purposes the one text field
+  instead of opening another (grammar + ranking: `app/Palette.hpp`, unit-tested).
+
+  | typed | mode | Enter |
+  |---|---|---|
+  | `task text` | add (unchanged) | add the task, LLM-classified as before |
+  | `?query` | **find** (amber) | jump to the active match, stay in find mode |
+  | `:12` | **select** (blue) | select node 12 (the number is its id badge) |
+  | `:?query` / `:query` | **select by text** | select the active match |
+  | `>12` | **parent** (green) | make node 12 the parent of the selection |
+  | `>?query` / `>query` | **parent by text** | make the active match the parent |
+
+  After `:` / `>` the `?` is optional — a non-numeric tail is a text query anyway. A
+  **leading space escapes** the grammar, so `" :literal"` adds a task named `:literal`.
+  Text modes show a **drop-up list** above the bar (up to 4 rows of `[id] text` + "+N
+  more"); `↑`/`↓` walk it (wrapping), the bar's **border and the drop-up are tinted by
+  mode** and the active candidate is ringed on canvas — blue for select/find (what Enter
+  acts on), green for parent (where the selection lands), while every match keeps its amber
+  ring. The bar also shows a status: `7 matches`, `no match`, `node 12`, `→ child of 12`,
+  `can't move there`, `select a node first`. Targets hidden under a collapsed ancestor are
+  **revealed** (ancestors expanded) when committed; the canvas only pans if the target is
+  **off screen**, and never for a `>` move onto a visible node (that one anchors instead).
+  `Esc` backs out of the command, leaving the overlay open.
 - **Collapse / expand**: nodes with children show a small disc handle on the bottom edge —
   a minus when expanded, the hidden-descendant count when collapsed. Clicking it toggles
   the node's `collapsed` flag; layout then treats it as a leaf (subtree hidden, no
@@ -205,8 +227,8 @@ for the off case (see `LlmLog.hpp`).
 - **World vs screen.** The canvas has a view transform `screen = pan + zoom * world`.
   Node rects (`rects_`) are world coordinates; the renderer applies `pan`/`zoom` via
   `nvgTranslate`/`nvgScale`. Hit-testing/dragging convert with
-  `worldMouse = (cursor - pan) / zoom`. Screen-space UI (DONE panel, input bar, search
-  bar) is drawn without the transform.
+  `worldMouse = (cursor - pan) / zoom`. Screen-space UI (DONE panel, input bar, palette
+  drop-up) is drawn without the transform.
 - **The running app owns `tasks.json`.** It rewrites the file on every change, so editing
   the file externally while the app runs gets clobbered. To edit safely: stop the app,
   re-read, edit, restart (`tasktree stop`/`start`).
