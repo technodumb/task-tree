@@ -35,7 +35,8 @@ struct InputStyle {
     bool editing = false;        // in-place node text edit: selection-blue border
     bool tinted = false;         // use `border` (a palette mode) instead of the defaults
     Color border{};
-    std::string chip;            // mode name drawn as a tinted pill on the left ("find")
+    std::string chip;            // mode name, drawn as a section at the bar's left end
+    float chipWidth = 0.f;       // minimum section width, so every mode reserves the same
     std::string status;          // right-aligned + dimmed, e.g. "7 matches" / "node 12"
     std::string placeholder;     // shown when empty; empty string = the default prompt
 };
@@ -96,9 +97,12 @@ public:
                    const InputStyle& style);
 
     // Command-palette drop-up: candidate rows in a card sitting directly above the input
-    // box, best match first. `activeRow` is the ↑/↓ cursor, `moreCount` renders "+N more",
-    // `hint` is the dimmed key legend on the footer line, `tint` matches the bar's border.
-    void drawPalette(const Rect& inputBox, const std::vector<std::string>& rows, int activeRow,
+    // box, best match first. Each row is (lead, rest) — an id badge or a mode symbol, then
+    // its text; every lead gets the same column width so the text lines up. `activeRow` is
+    // the ↑/↓ cursor, `moreCount` renders "+N more", `hint` is the small key legend on the
+    // footer line, `tint` matches the bar's border.
+    void drawPalette(const Rect& inputBox,
+                     const std::vector<std::pair<std::string, std::string>>& rows, int activeRow,
                      int moreCount, const std::string& hint, const Color& tint,
                      const Config& cfg);
 
@@ -111,6 +115,8 @@ public:
 
     // Wrapped height of `text` at the given content width (for card sizing).
     float measureTextHeight(const std::string& text, float width) const;
+    // Single-line advance width of `text` (App sizes the input bar's mode section with it).
+    float measureTextWidth(const std::string& text) const;
 
     float fontSize() const { return fontSize_; }
 

@@ -374,11 +374,11 @@ void App::drawPaletteDropUp(const Rect& inputBox) {
     // the highlighted one, so repeating it in every row is noise.
     if (pmode_ == palette::Mode::Menu) {
         if (menuItems_.empty()) return;
-        std::vector<std::string> rows;
+        std::vector<std::pair<std::string, std::string>> rows;
         rows.reserve(menuItems_.size());
         for (palette::Mode m : menuItems_) {
             const palette::ModeInfo* i = palette::infoFor(m);
-            if (i) rows.push_back(std::string(1, i->prefix) + "   " + i->blurb);
+            if (i) rows.emplace_back(std::string(1, i->prefix), i->blurb);
         }
         renderer_.drawPalette(inputBox, rows, static_cast<int>(candidateIdx_), 0,
                               "↑↓ pick · Enter use · Esc cancel", paletteTint(), cfg_);
@@ -393,11 +393,12 @@ void App::drawPaletteDropUp(const Rect& inputBox) {
     else           first = 0;
     const std::size_t shown = std::min(kRows, n - first);
 
-    std::vector<std::string> rows;
+    std::vector<std::pair<std::string, std::string>> rows;
     rows.reserve(shown);
     for (std::size_t i = first; i < first + shown; ++i) {
         const Task* t = forest_.get(candidates_[i]);
-        rows.push_back("[" + std::to_string(candidates_[i]) + "]  " + (t ? t->text : std::string{}));
+        rows.emplace_back("[" + std::to_string(candidates_[i]) + "]",
+                          t ? t->text : std::string{});
     }
 
     const char* hint = cmd_.reparents() ? "↑↓ pick · Enter make parent · Esc cancel"
@@ -843,6 +844,11 @@ void App::drawScene(int winW, int winH, float dpr) {
             style.border = paletteTint();
             style.chip = info ? (menu ? std::string(info->name) : std::string(info->name) + ":")
                               : std::string{};
+            // Every mode reserves the width of the longest label, so switching modes never
+            // shifts the text after it.
+            for (const palette::ModeInfo& i : palette::modes())
+                style.chipWidth = std::max(style.chipWidth,
+                                           renderer_.measureTextWidth(std::string(i.name) + ":") + 24.f);
             if (menu) {
                 barText.clear();
             } else {

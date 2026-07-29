@@ -374,12 +374,13 @@ Rect Renderer::drawInput(float screenW, float screenH, const std::string& text,
     float asc = 0, desc = 0, lineH = 0;
     nvgTextMetrics(vg_, &asc, &desc, &lineH);
 
-    // A palette mode reserves a pill on the left ("find:", "parent:"); the text — and the
-    // wrap width with it — is indented past it so the two never collide.
+    // A palette mode claims a section at the bar's left end; the text — and the wrap width
+    // with it — starts after it, so the two never collide. `chipWidth` lets the caller give
+    // every mode the same section width so the text doesn't shift when the mode changes.
     const float chipTextW = style.chip.empty()
                               ? 0.f
                               : nvgTextBounds(vg_, 0, 0, style.chip.c_str(), end(style.chip), nullptr);
-    const float chipW = style.chip.empty() ? 0.f : chipTextW + 20.f;
+    const float chipW = style.chip.empty() ? 0.f : std::max(chipTextW + 24.f, style.chipWidth);
     const float contentW = boxW - 2 * padX_ - chipW;
 
     // Wrap the input into visual lines so the box grows as text is typed.
@@ -423,26 +424,47 @@ Rect Renderer::drawInput(float screenW, float screenH, const std::string& text,
     const Color border = style.tinted ? style.border : (editing ? editBorder : cfg.nodeBorder);
     drawFieldChrome(bx, by, boxW, boxH, cfg, border);
 
-    // Mode pill: filled with the mode's accent, label in the same hue, vertically centred.
+    // Mode section: a full-height band at the left end of the bar. Its left corners share
+    // the box's radius so it sits flush inside the border; the right edge is straight, with
+    // a hairline rule separating it from the text.
     if (!style.chip.empty()) {
-        const float ch = lineH + 2.f;
-        const float cy = by + (boxH - ch) * 0.5f;
+        const float inset = 1.5f;                      // stay inside the border stroke
+        const float r = std::max(0.f, cfg.cornerRadius - inset);
+        const float x0 = bx + inset, x1 = bx + chipW;
+        const float y0 = by + inset, y1 = by + boxH - inset;
         nvgBeginPath(vg_);
-        nvgRoundedRect(vg_, bx + padX_ - 4.f, cy, chipW - 6.f, ch, cfg.cornerRadius * 0.55f);
-        nvgFillColor(vg_, col(border, 0.20f));
+        nvgMoveTo(vg_, x1, y0);
+        nvgLineTo(vg_, x0 + r, y0);
+        nvgArcTo(vg_, x0, y0, x0, y0 + r, r);          // top-left, same curve as the box
+        nvgLineTo(vg_, x0, y1 - r);
+        nvgArcTo(vg_, x0, y1, x0 + r, y1, r);          // bottom-left
+        nvgLineTo(vg_, x1, y1);
+        nvgClosePath(vg_);
+        nvgFillColor(vg_, col(border, 0.18f));
         nvgFill(vg_);
-        nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+
+        nvgBeginPath(vg_);                             // divider
+        nvgMoveTo(vg_, x1, y0);
+        nvgLineTo(vg_, x1, y1);
+        nvgStrokeColor(vg_, col(border, 0.55f));
+        nvgStrokeWidth(vg_, 1.f);
+        nvgStroke(vg_);
+
+        nvgTextAlign(vg_, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
         nvgFillColor(vg_, col(border, 0.95f));
-        nvgText(vg_, bx + padX_ + 4.f, cy + ch * 0.5f, style.chip.c_str(), end(style.chip));
+        nvgText(vg_, (x0 + x1) * 0.5f, by + boxH * 0.5f, style.chip.c_str(), end(style.chip));
     }
 
     // Text (or placeholder): the visible rows form a block centred vertically in the
     // box (the search field's balanced look), one row per wrapped line.
-    const float tx = bx + padX_ + chipW;
+    const float tx = bx + chipW + padX_;
     const float textTop = by + (boxH - shown * lineH) * 0.5f;
     nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
     if (text.empty()) {
+        // In a palette mode the style's placeholder is authoritative — empty means show
+        // nothing (the mode section already says what the bar is for).
         const char* ph = !style.placeholder.empty() ? style.placeholder.c_str()
+                       : style.tinted ? ""
                        : editing ? "Edit text — Enter to save, Esc to cancel"
                                  : "Type a task, or / for other modes…";
         nvgFillColor(vg_, col(cfg.nodeText, 0.4f));
@@ -496,7 +518,8 @@ std::string Renderer::fitText(const std::string& s, float maxW) const {
     return out;
 }
 
-void Renderer::drawPalette(const Rect& inputBox, const std::vector<std::string>& rows,
+void Renderer::drawPalette(const Rect& inputBox,
+                           const std::vector<std::pair<std::string, std::string>>& rows,
                            int activeRow, int moreCount, const std::string& hint,
                            const Color& tint, const Config& cfg) {
     if (rows.empty()) return;
@@ -516,6 +539,16 @@ void Renderer::drawPalette(const Rect& inputBox, const std::vector<std::string>&
 
     const float contentW = w - 2 * padX_;
     nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+
+    // One shared width for the lead column: '?' and '>' (or "[7]" and "[130]") advance
+    // differently, so without this the descriptions would step in and out.
+    float leadW = 0.f;
+    for (const auto& [lead, rest] : rows) {
+        (void)rest;
+        leadW = std::max(leadW, nvgTextBounds(vg_, 0, 0, lead.c_str(), end(lead), nullptr));
+    }
+    leadW += 14.f;
+
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const float ry = y + pad + i * rowH;
         const bool active = static_cast<int>(i) == activeRow;
@@ -526,9 +559,13 @@ void Renderer::drawPalette(const Rect& inputBox, const std::vector<std::string>&
             nvgFillColor(vg_, col(tint, 0.16f));
             nvgFill(vg_);
         }
-        const std::string line = fitText(rows[i], contentW);
+        const float ty = ry + rowH * 0.5f;
+        const std::string& lead = rows[i].first;
+        nvgFillColor(vg_, col(tint, active ? 1.f : 0.7f));
+        nvgText(vg_, x + padX_, ty, lead.c_str(), end(lead));
+        const std::string line = fitText(rows[i].second, contentW - leadW);
         nvgFillColor(vg_, col(cfg.nodeText, active ? 1.f : 0.62f));
-        nvgText(vg_, x + padX_, ry + rowH * 0.5f, line.c_str(), end(line));
+        nvgText(vg_, x + padX_ + leadW, ty, line.c_str(), end(line));
     }
 
     const float fy = y + pad + rows.size() * rowH + footerH * 0.5f;
@@ -542,6 +579,13 @@ void Renderer::drawPalette(const Rect& inputBox, const std::vector<std::string>&
         nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
     }
     nvgFontSize(vg_, fontSize_);   // leave the shared context as we found it
+}
+
+float Renderer::measureTextWidth(const std::string& text) const {
+    if (text.empty()) return 0.f;
+    nvgFontFaceId(vg_, font_);
+    nvgFontSize(vg_, fontSize_);
+    return nvgTextBounds(vg_, 0, 0, text.c_str(), end(text), nullptr);
 }
 
 float Renderer::measureTextHeight(const std::string& text, float width) const {

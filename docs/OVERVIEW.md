@@ -145,7 +145,10 @@ snapshots, so any mutation is reversible without per-op inverse logic (v2).
   chords so there's no collision.
 - **Command palette (the input bar)**: a symbol typed into the *empty* bar switches its
   **mode** instead of opening another field. The symbol is **consumed** — it never appears
-  in the text; the bar grows a tinted `find:` / `select:` / `parent:` pill on the left and
+  in the text; the bar grows a tinted `find:` / `select:` / `parent:` **section** at its left
+  end (full height, left corners sharing the box radius so it sits flush inside the border,
+  straight right edge with a hairline divider, and one width for every mode so the text
+  never shifts when the mode changes) and
   what you type after it is just that mode's argument. Grammar + ranking live in
   `app/Palette.hpp` (pure, unit-tested); `App` owns the side effects.
 
@@ -160,7 +163,7 @@ snapshots, so any mutation is reversible without per-op inverse logic (v2).
   In select/parent, digits mean *by id* (the node's id badge) and anything else is a text
   query; a leading `?` in the argument forces text (`:?12` looks for the text "12"), so the
   `:?query` / `>?query` spellings work exactly as typed. `/` is a **picker, not a filter**:
-  the bar shows only the highlighted mode's *name* as its pill (`find`, not `mode: find`;
+  the bar shows only the highlighted mode's *name* in its section (`find`, not `mode: find`;
   caret hidden, no argument), each drop-up row is a **symbol + what it does** (no names —
   the bar has that), and the whole bar takes that mode's colour so `↑`/`↓` previews what
   you're switching into. Typing a mode's symbol jumps straight to it. A prefix typed into an empty argument **switches** modes
@@ -170,8 +173,10 @@ snapshots, so any mutation is reversible without per-op inverse logic (v2).
   space first (commit trims it).
 
   Text modes show a **drop-up list** above the bar (up to 4 rows of `[id] text` + "+N
-  more"), windowed to keep the `↑`/`↓` cursor visible; the cursor wraps. Mode is legible
-  without reading the prefix because the pill, the border, the drop-up tint and the canvas
+  more"), windowed to keep the `↑`/`↓` cursor visible; the cursor wraps. Every row is
+  (lead, rest) — id badge or mode symbol, then its text — and the lead column is one shared
+  width, so ids/symbols of different widths still leave the text aligned. Mode is legible
+  without reading the prefix because the section, the border, the drop-up tint and the canvas
   ring share one vocabulary: blue = what Enter acts on, green = where the selection lands,
   amber = every match. The bar's right edge shows status: `7 matches`, `no match`,
   `node 12`, `→ child of 12`, `can't move there`, `select a node first`. Targets hidden
