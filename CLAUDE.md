@@ -16,16 +16,23 @@ tasks into your context at startup — so this works from **any** Claude instanc
 folder. When you start a session here, **proactively** pick up that work — don't wait to
 be asked:
 
-1. Read `~/.local/share/tasktree/tasks.json`. Collect **canvas** (non-DONE) tasks whose
-   text starts with `ttd>` (case-insensitive, optional space). These are dev tasks for you.
+1. Read the store in `~/.local/share/tasktree/`: **`tasks.db` if it exists, otherwise
+   `tasks.json`** — the DB wins once created, which is the rule `src/main.cpp` and
+   `scripts/ttd-scan.sh` both use. Collect **canvas** (non-DONE) tasks whose text starts
+   with `ttd>` (case-insensitive, optional space). These are dev tasks for you.
+   In the DB there are no `roots`/`doneRoots`/`children` lists: a task is top-level when
+   `parent = 0`, a DONE root when `parent = 0 AND done = 1`, and the DONE section is that
+   row plus its descendants. `ord` is the position among siblings.
 2. If there are any clearly-scoped ones, **start implementing them now**. For each:
    implement → build (`cmake --build build -j`) → `ctest` → commit (one focused commit
    per task; **never push**).
 3. File each completed task into the DONE section under a done-root titled **`ttd ✓ done`**
-   (create it if missing). Because the running app owns `tasks.json`, edit it safely:
-   `~/.init-scripts/tasktree.sh stop` → re-read the CURRENT file → apply the edit →
-   `~/.init-scripts/tasktree.sh start`. Preserve every other task exactly (ids, order,
-   parents, status, roots/doneRoots).
+   (create it if missing). The running app owns the store and overwrites it wholesale on
+   its next save, so edit safely: `~/.init-scripts/tasktree.sh stop` → re-read the CURRENT
+   store → apply the edit → `~/.init-scripts/tasktree.sh start`. Never edit it while the
+   app runs. Preserve every other task exactly (ids, order, parents, status, done state);
+   for the DB that means `ord` and `parent` too, and `meta.next_id` must not go backwards.
+   There is no `sqlite3` CLI on this machine — use `python3 -c "import sqlite3; …"`.
 4. If a task is **ambiguous, risky, or destructive, don't implement it** — surface the
    doubt (tell the user, and/or flag it orange `status=2` / add a `❓ <question>` child
    in the tree) and move on. You're in a live session, so just ask the user directly
