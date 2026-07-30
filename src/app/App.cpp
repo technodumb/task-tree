@@ -39,7 +39,11 @@ constexpr double kPanAnimDur = 0.28;    // seconds for the search / new-node cam
 App::App(IPlatform& platform, Renderer& renderer, IClassifier& classifier,
          Config& cfg, Forest& forest, std::string tasksPath)
     : platform_(platform), renderer_(renderer), classifier_(classifier),
-      cfg_(cfg), forest_(forest), tasksPath_(std::move(tasksPath)) {}
+      cfg_(cfg), forest_(forest), tasksPath_(std::move(tasksPath)),
+      // `forest` is already loaded by main, so this is exactly what is on disk: the
+      // correct starting baseline. Seeding it empty would make the first save look like
+      // "everything is new, nothing was deleted" and leak deleted rows.
+      lastSaved_(forest) {}
 
 // ---- hotkey actions --------------------------------------------------------
 
@@ -1039,7 +1043,12 @@ double App::desiredTimeout() const {
     return -1.0;                           // block until an event/hotkey
 }
 
-void App::save() { store::save(forest_, tasksPath_); }
+void App::save() {
+    // Incremental: the store writes only the difference from `lastSaved_`, which also
+    // tells it which absences are real deletions. Advance the baseline only on success,
+    // so a failed write is retried in full by the next save.
+    if (store::save(forest_, tasksPath_, &lastSaved_)) lastSaved_ = forest_;
+}
 
 void App::undo() {
     if (!history_.undo(forest_)) return;

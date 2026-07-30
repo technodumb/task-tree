@@ -189,6 +189,96 @@ int main() {
         removeDb(db);
     }
 
+    // ---- Incremental writes ----------------------------------------------------
+    {
+        Forest f;
+        TaskId a = f.addTask("root");
+        TaskId b = f.addTask("first", a);
+        TaskId c = f.addTask("middle", a);
+        TaskId d = f.addTask("last", a);
+
+        const std::string db = tmpFile("incremental.db").string();
+        removeDb(db);
+        CHECK(store::saveDb(f, db), "seed with a full write");
+
+        // Edit one field; the rest of the tree must be untouched and still correct.
+        Forest base = f;                       // what disk holds now
+        f.get(b)->text = "first, edited";
+        f.get(b)->status = 1;
+        CHECK(store::saveDb(f, db, &base), "incremental save of one edit");
+        Forest g;
+        CHECK(store::loadDb(g, db) && equivalent(f, g), "edit landed, nothing else moved");
+
+        // Removing a middle child renumbers its later sibling's `ord` without changing a
+        // single column on that sibling's row — the diff has to notice.
+        base = f;
+        f.removeSubtree(c);
+        CHECK(store::saveDb(f, db, &base), "incremental save of a deletion");
+        Forest h;
+        CHECK(store::loadDb(h, db), "load after incremental delete");
+        CHECK(!h.exists(c), "deleted row is gone");
+        CHECK(h.get(a) && h.get(a)->children.size() == 2, "two children left");
+        CHECK(h.get(a) && h.get(a)->children[0] == b && h.get(a)->children[1] == d,
+              "surviving siblings keep their order after the ord shift");
+        CHECK(equivalent(f, h), "post-delete state round-trips");
+
+        // A new node arrives through the incremental path too.
+        base = f;
+        TaskId e = f.addTask("added later", a);
+        CHECK(store::saveDb(f, db, &base), "incremental save of an insert");
+        Forest k;
+        CHECK(store::loadDb(k, db) && equivalent(f, k), "insert landed");
+        CHECK(k.exists(e), "new row present");
+        removeDb(db);
+    }
+
+    // ---- A second writer's task is not clobbered -------------------------------
+    // The whole point of row-level writes. Two Forests stand in for two processes: each
+    // has its own baseline, and neither may delete what it never knew about.
+    {
+        Forest seed;
+        TaskId keep = seed.addTask("shared task");
+        seed.addTask("another", keep);
+
+        const std::string db = tmpFile("two_writers.db").string();
+        removeDb(db);
+        CHECK(store::saveDb(seed, db), "seed the shared DB");
+
+        // Both "processes" load the same state.
+        Forest appSide, cliSide;
+        CHECK(store::loadDb(appSide, db) && store::loadDb(cliSide, db), "both load");
+        const Forest appBaseline = appSide;    // the app's view of disk, now frozen
+        const Forest cliBaseline = cliSide;
+
+        // The other writer adds a task and commits it.
+        TaskId external = cliSide.addTask("added by the CLI");
+        CHECK(store::saveDb(cliSide, db, &cliBaseline), "external writer inserts");
+
+        // The app, which has never heard of that task, saves an unrelated edit.
+        appSide.get(keep)->text = "edited by the app";
+        CHECK(store::saveDb(appSide, db, &appBaseline), "app saves its own edit");
+
+        Forest after;
+        CHECK(store::loadDb(after, db), "reload the shared DB");
+        CHECK(after.exists(external), "the external task SURVIVED the app's save");
+        CHECK(after.get(keep) && after.get(keep)->text == "edited by the app",
+              "the app's edit landed");
+        CHECK(after.size() == 3, "three tasks: both writers' work is present");
+        CHECK(after.nextId >= cliSide.nextId, "next_id did not move backwards");
+
+        // Contrast, so the mechanism is load-bearing rather than incidental: the same
+        // save WITHOUT a baseline is a full rewrite, and does drop the external task.
+        const std::string db2 = tmpFile("two_writers_full.db").string();
+        removeDb(db2);
+        CHECK(store::saveDb(cliSide, db2), "seed a second DB including the external task");
+        CHECK(store::saveDb(appSide, db2), "app full-rewrites it (baseline = nullptr)");
+        Forest wiped;
+        CHECK(store::loadDb(wiped, db2), "reload after the full rewrite");
+        CHECK(!wiped.exists(external), "full rewrite drops it — which is why baselines exist");
+        removeDb(db);
+        removeDb(db2);
+    }
+
     // ---- JSON -> SQLite migration: verified and non-destructive ----------------
     {
         Forest f;

@@ -25,8 +25,8 @@ bool load(Forest& f, const std::string& path) {
     return isDbPath(path) ? loadDb(f, path) : loadJson(f, path);
 }
 
-bool save(const Forest& f, const std::string& path) {
-    return isDbPath(path) ? saveDb(f, path) : saveJson(f, path);
+bool save(const Forest& f, const std::string& path, const Forest* baseline) {
+    return isDbPath(path) ? saveDb(f, path, baseline) : saveJson(f, path);
 }
 
 bool loadJson(Forest& f, const std::string& path) {

@@ -89,6 +89,19 @@ std::unordered_map<TaskId, int> siblingOrder(const Forest& f) {
     return ord;
 }
 
+int ordOf(const std::unordered_map<TaskId, int>& ord, TaskId id) {
+    const auto it = ord.find(id);
+    return it == ord.end() ? 0 : it->second;
+}
+
+// Do these two tasks produce identical columns? `children` is deliberately excluded —
+// it is stored as the children's own parent+ord, not on this row.
+bool sameRow(const Task& a, const Task& b) {
+    return a.parent == b.parent && a.text == b.text && a.done == b.done &&
+           a.collapsed == b.collapsed && a.status == b.status &&
+           a.createdAt == b.createdAt && a.doneAt == b.doneAt;
+}
+
 } // namespace
 
 bool loadDb(Forest& f, const std::string& path) {
@@ -152,32 +165,47 @@ bool loadDb(Forest& f, const std::string& path) {
     return true;
 }
 
-bool saveDb(const Forest& f, const std::string& path) {
+bool saveDb(const Forest& f, const std::string& path, const Forest* baseline) {
     const fs::path p(path);
     if (auto dir = p.parent_path(); !dir.empty()) paths::ensureDir(dir);
 
     Db db;
     if (!openDb(db, path, true)) return false;
-    // One transaction for the whole forest: a reader sees the previous state or the new
-    // one, never a half-written tree. IMMEDIATE takes the write lock up front.
+    // One transaction per save: a reader sees the previous state or the new one, never a
+    // half-written tree. IMMEDIATE takes the write lock up front.
     if (!db.exec("BEGIN IMMEDIATE")) return false;
 
     bool ok = true;
     const std::unordered_map<TaskId, int> ord = siblingOrder(f);
 
-    // Rows currently on disk, so tasks deleted from the forest are deleted here too.
-    std::unordered_set<TaskId> onDisk;
-    {
+    // Work out the minimum set of statements.
+    std::vector<TaskId> upserts;
+    std::vector<TaskId> deletes;
+    if (baseline) {
+        // Incremental. `ord` is compared too: removing a middle child renumbers its later
+        // siblings without changing a single field on their rows.
+        const std::unordered_map<TaskId, int> was = siblingOrder(*baseline);
+        for (const auto& [id, t] : f.nodes) {
+            const Task* b = baseline->get(id);
+            if (!b || !sameRow(t, *b) || ordOf(ord, id) != ordOf(was, id)) upserts.push_back(id);
+        }
+        for (const auto& [id, t] : baseline->nodes)
+            if (!f.exists(id)) deletes.push_back(id);   // WE deleted it; absence alone is not proof
+    } else {
+        // Full rewrite: every node, and drop whatever else the table holds.
+        for (const auto& [id, t] : f.nodes) upserts.push_back(id);
         Stmt q;
         if (q.prepare(db.h, "SELECT id FROM tasks")) {
-            while (sqlite3_step(q.h) == SQLITE_ROW)
-                onDisk.insert(static_cast<TaskId>(sqlite3_column_int64(q.h, 0)));
+            while (sqlite3_step(q.h) == SQLITE_ROW) {
+                const TaskId id = static_cast<TaskId>(sqlite3_column_int64(q.h, 0));
+                if (!f.exists(id)) deletes.push_back(id);
+            }
         } else {
             ok = false;
         }
     }
 
-    if (ok) {
+    if (ok && !upserts.empty()) {
         Stmt up;
         ok = up.prepare(db.h,
                         "INSERT INTO tasks(id,parent,ord,text,done,collapsed,status,"
@@ -186,30 +214,30 @@ bool saveDb(const Forest& f, const std::string& path) {
                         " ord=excluded.ord, text=excluded.text, done=excluded.done,"
                         " collapsed=excluded.collapsed, status=excluded.status,"
                         " created_at=excluded.created_at, done_at=excluded.done_at");
-        for (const auto& [id, t] : f.nodes) {
+        for (TaskId id : upserts) {
             if (!ok) break;
-            const auto it = ord.find(id);
+            const Task* t = f.get(id);
+            if (!t) continue;
             sqlite3_reset(up.h);
-            sqlite3_bind_int64(up.h, 1, static_cast<sqlite3_int64>(t.id));
-            sqlite3_bind_int64(up.h, 2, static_cast<sqlite3_int64>(t.parent));
-            sqlite3_bind_int(up.h, 3, it == ord.end() ? 0 : it->second);
-            // SQLITE_STATIC: `t` lives in the forest, which outlives this step().
-            sqlite3_bind_text(up.h, 4, t.text.c_str(), -1, SQLITE_STATIC);
-            sqlite3_bind_int(up.h, 5, t.done ? 1 : 0);
-            sqlite3_bind_int(up.h, 6, t.collapsed ? 1 : 0);
-            sqlite3_bind_int(up.h, 7, t.status);
-            sqlite3_bind_int64(up.h, 8, t.createdAt);
-            sqlite3_bind_int64(up.h, 9, t.doneAt);
+            sqlite3_bind_int64(up.h, 1, static_cast<sqlite3_int64>(t->id));
+            sqlite3_bind_int64(up.h, 2, static_cast<sqlite3_int64>(t->parent));
+            sqlite3_bind_int(up.h, 3, ordOf(ord, id));
+            // SQLITE_STATIC: `*t` lives in the forest, which outlives this step().
+            sqlite3_bind_text(up.h, 4, t->text.c_str(), -1, SQLITE_STATIC);
+            sqlite3_bind_int(up.h, 5, t->done ? 1 : 0);
+            sqlite3_bind_int(up.h, 6, t->collapsed ? 1 : 0);
+            sqlite3_bind_int(up.h, 7, t->status);
+            sqlite3_bind_int64(up.h, 8, t->createdAt);
+            sqlite3_bind_int64(up.h, 9, t->doneAt);
             ok = sqlite3_step(up.h) == SQLITE_DONE;
         }
     }
 
-    if (ok) {
+    if (ok && !deletes.empty()) {
         Stmt del;
         ok = del.prepare(db.h, "DELETE FROM tasks WHERE id=?");
-        for (TaskId id : onDisk) {
+        for (TaskId id : deletes) {
             if (!ok) break;
-            if (f.exists(id)) continue;
             sqlite3_reset(del.h);
             sqlite3_bind_int64(del.h, 1, static_cast<sqlite3_int64>(id));
             ok = sqlite3_step(del.h) == SQLITE_DONE;
@@ -217,9 +245,12 @@ bool saveDb(const Forest& f, const std::string& path) {
     }
 
     if (ok) {
+        // next_id never moves backwards: another writer may have taken ids beyond ours,
+        // and lowering it would hand out an id that is already in use.
         Stmt m;
         ok = m.prepare(db.h, "INSERT INTO meta(key,value) VALUES('next_id',?)"
-                             " ON CONFLICT(key) DO UPDATE SET value=excluded.value");
+                             " ON CONFLICT(key) DO UPDATE SET"
+                             " value=MAX(CAST(value AS INTEGER),CAST(excluded.value AS INTEGER))");
         if (ok) {
             sqlite3_bind_int64(m.h, 1, static_cast<sqlite3_int64>(f.nextId));
             ok = sqlite3_step(m.h) == SQLITE_DONE;

@@ -21,15 +21,23 @@ bool isDbPath(const std::string& path);
 // Backend-dispatching load/save. Load returns false if the file is absent or
 // unreadable, leaving `f` empty. Save is atomic in both backends (temp+rename for
 // JSON, a transaction for SQLite).
+//
+// `baseline` is the state this process last successfully wrote or loaded. Given one,
+// the SQLite backend writes ONLY the difference, and — the important part — infers a
+// deletion from "present in baseline, gone from `f`" instead of "absent from `f`".
+// Rows in neither are then left alone rather than deleted, so a task another writer
+// added while we were running survives our next save. Pass nullptr (the default) for
+// a full rewrite, which does delete anything not in `f`. JSON ignores it: rewriting
+// the whole file is inherent to that format.
 bool load(Forest& f, const std::string& path);
-bool save(const Forest& f, const std::string& path);
+bool save(const Forest& f, const std::string& path, const Forest* baseline = nullptr);
 
 // The backends explicitly, for the migration, export/import and the tests.
 // Malformed JSON entries are handled defensively (orphans promoted to roots).
 bool loadJson(Forest& f, const std::string& path);
 bool saveJson(const Forest& f, const std::string& path);
 bool loadDb(Forest& f, const std::string& path);
-bool saveDb(const Forest& f, const std::string& path);
+bool saveDb(const Forest& f, const std::string& path, const Forest* baseline = nullptr);
 
 // One-time JSON -> SQLite migration. Non-destructive and self-verifying:
 //   - refuses (false) if `dbPath` already exists — an existing store is never touched

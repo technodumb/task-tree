@@ -27,12 +27,15 @@ be asked:
    implement → build (`cmake --build build -j`) → `ctest` → commit (one focused commit
    per task; **never push**).
 3. File each completed task into the DONE section under a done-root titled **`ttd ✓ done`**
-   (create it if missing). The running app owns the store and overwrites it wholesale on
-   its next save, so edit safely: `~/.init-scripts/tasktree.sh stop` → re-read the CURRENT
-   store → apply the edit → `~/.init-scripts/tasktree.sh start`. Never edit it while the
-   app runs. Preserve every other task exactly (ids, order, parents, status, done state);
-   for the DB that means `ord` and `parent` too, and `meta.next_id` must not go backwards.
-   There is no `sqlite3` CLI on this machine — use `python3 -c "import sqlite3; …"`.
+   (create it if missing). Edit safely: `~/.init-scripts/tasktree.sh stop` → re-read the
+   CURRENT store → apply the edit → `~/.init-scripts/tasktree.sh start`. **Still stop the
+   app first**, but for a narrower reason than before: the DB save is now incremental, so
+   it no longer wholesale-overwrites and a row you insert while it runs will survive. What
+   it does not yet do is *notice* — the app holds a stale in-memory copy, so your change is
+   invisible until restart, and if the app later edits that same task it writes its own
+   version over yours. Preserve every other task exactly (ids, order, parents, status, done
+   state); for the DB that means `ord` and `parent` too, and `meta.next_id` must not go
+   backwards. There is no `sqlite3` CLI on this machine — use `python3 -c "import sqlite3; …"`.
 4. If a task is **ambiguous, risky, or destructive, don't implement it** — surface the
    doubt (tell the user, and/or flag it orange `status=2` / add a `❓ <question>` child
    in the tree) and move on. You're in a live session, so just ask the user directly

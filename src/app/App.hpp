@@ -107,6 +107,10 @@ private:
     DragController drag_;
     LayoutParams params_;
     History history_;   // undo/redo snapshots of forest_
+    // What the store last confirmed on disk — the baseline every save diffs against, so
+    // each write carries only the change AND a node missing from forest_ is known to have
+    // been deleted here rather than added by another writer. Seeded with the loaded forest.
+    Forest lastSaved_;
 
     // Command palette: the input bar itself, re-purposed by a leading ? / : / > (grammar +
     // match ranking in app/Palette.hpp). Ctrl+F is just "prefix the bar with ?" — there is
