@@ -11,11 +11,17 @@
 // deliberately outside the model, readable via deletedRows(). An id that comes back (an
 // undone delete) has `deleted_at` cleared to 0 by the upsert.
 //
-// The forest's three orderings all collapse into `ord` = position among siblings, or
-// among top-level nodes. Top-level nodes are those with parent = 0 (kNoParent), split
-// into canvas roots vs DONE roots by the `done` flag — exactly the rule
-// Forest::reindexRootsAfterLoad already uses, so the derivation is not a new invariant.
-// Roots and doneRoots number their `ord` independently; the done flag keeps them apart.
+// `ord` is a task's position among its siblings, or among the top-level tasks (parent = 0).
+// A done task keeps its parent and its `ord` — being done is a flag, not a move — so:
+//
+//   top-level tasks   parent = 0, ordered by ord     (done ones included)
+//   children of P     parent = P, ordered by ord     (ditto)
+//   canvas            tasks with no `done` on their ancestor chain
+//   DONE section      done = 1, and its top entries are those whose parent chain has no
+//                     other done task — so a done child of a live parent heads its own
+//                     entry while staying in place under that parent
+//
+// Un-doing therefore needs no stored memory of where a task used to be: it never left.
 //
 // This is the whole-forest path (load once at startup, save the lot in one transaction),
 // which is parity with the JSON store, not yet the incremental/concurrent story that
@@ -113,12 +119,11 @@ bool openDb(Db& db, const std::string& path, bool create) {
     return upgradeSchema(db);
 }
 
-// Position of every node within its sibling list (or within roots / doneRoots).
+// Position of every node within its sibling list (or among the top-level tasks).
 std::unordered_map<TaskId, int> siblingOrder(const Forest& f) {
     std::unordered_map<TaskId, int> ord;
     ord.reserve(f.nodes.size());
     for (std::size_t i = 0; i < f.roots.size(); ++i) ord[f.roots[i]] = static_cast<int>(i);
-    for (std::size_t i = 0; i < f.doneRoots.size(); ++i) ord[f.doneRoots[i]] = static_cast<int>(i);
     for (const auto& [id, t] : f.nodes)
         for (std::size_t i = 0; i < t.children.size(); ++i)
             ord[t.children[i]] = static_cast<int>(i);
@@ -149,11 +154,10 @@ bool loadDb(Forest& f, const std::string& path) {
 
     f.nodes.clear();
     f.roots.clear();
-    f.doneRoots.clear();
     f.nextId = 1;
 
     // Grouped by parent and in sibling order, so a single appending pass rebuilds
-    // children / roots / doneRoots in exactly the order they were written.
+    // `children` and `roots` in exactly the order they were written.
     std::vector<TaskId> rowOrder;
     {
         Stmt q;
@@ -190,7 +194,7 @@ bool loadDb(Forest& f, const std::string& path) {
         // Defensive, matching the JSON loader: a dangling parent becomes a root rather
         // than an unreachable node.
         if (t->parent != kNoParent && !f.exists(t->parent)) t->parent = kNoParent;
-        if (t->parent == kNoParent) (t->done ? f.doneRoots : f.roots).push_back(id);
+        if (t->parent == kNoParent) f.roots.push_back(id);   // done or not: same list
         else                        f.get(t->parent)->children.push_back(id);
     }
 

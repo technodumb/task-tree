@@ -20,9 +20,12 @@ be asked:
    `tasks.json`** — the DB wins once created, which is the rule `src/main.cpp` and
    `scripts/ttd-scan.sh` both use. Collect **canvas** (non-DONE) tasks whose text starts
    with `ttd>` (case-insensitive, optional space). These are dev tasks for you.
-   In the DB there are no `roots`/`doneRoots`/`children` lists: a task is top-level when
-   `parent = 0`, a DONE root when `parent = 0 AND done = 1`, and the DONE section is that
-   row plus its descendants. `ord` is the position among siblings.
+   In the DB there are no `roots`/`children` lists: a task is top-level when `parent = 0`
+   and `ord` is its position among its siblings. **Being done is a flag, not a move** — a
+   done task keeps its parent and slot, so a task is off the canvas when *any* task on its
+   parent chain (itself included) has `done = 1`, and the DONE section's top entries are the
+   done tasks whose parent chain holds no other done task. Deletion is soft: rows with
+   `deleted_at != 0` are retired and must be excluded from every query.
 2. If there are any clearly-scoped ones, **start implementing them now**. For each:
    implement → build (`cmake --build build -j`) → `ctest` → commit (one focused commit
    per task; **never push**).

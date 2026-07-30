@@ -44,13 +44,31 @@ bool Forest::isDescendantOf(TaskId node, TaskId ancestor) const {
 
 bool Forest::isInDoneSection(TaskId node) const {
     TaskId cur = node;
+    // Walk up: a done flag anywhere on the ancestor chain (including this node) takes it
+    // off the canvas. Bounded like the other walks, in case stored data holds a cycle.
     for (std::size_t steps = 0; cur != kNoParent && steps <= nodes.size(); ++steps) {
-        if (std::find(doneRoots.begin(), doneRoots.end(), cur) != doneRoots.end()) return true;
         const Task* t = get(cur);
         if (!t) break;
+        if (t->done) return true;
         cur = t->parent;
     }
     return false;
+}
+
+std::vector<TaskId> Forest::doneSectionRoots() const {
+    std::vector<TaskId> out;
+    for (const auto& [id, t] : nodes)
+        if (t.done && !isInDoneSection(t.parent)) out.push_back(id);
+    // Newest completion first. Tasks finished before doneAt existed have doneAt == 0 and
+    // fall back to id order (later id = created later = almost certainly finished later).
+    std::sort(out.begin(), out.end(), [this](TaskId a, TaskId b) {
+        const Task* ta = get(a);
+        const Task* tb = get(b);
+        const std::int64_t da = ta ? ta->doneAt : 0, dbb = tb ? tb->doneAt : 0;
+        if (da != dbb) return da > dbb;
+        return a > b;
+    });
+    return out;
 }
 
 void Forest::detachFromParent(TaskId child) {
@@ -60,7 +78,6 @@ void Forest::detachFromParent(TaskId child) {
         if (Task* p = get(c->parent)) eraseId(p->children, child);
     } else {
         eraseId(roots, child);
-        eraseId(doneRoots, child);
     }
     c->parent = kNoParent;
 }
@@ -100,30 +117,32 @@ std::size_t Forest::removeSubtree(TaskId id) {
 
 bool Forest::markDone(TaskId id) {
     Task* t = get(id);
-    if (!t) return false;
-    if (std::find(doneRoots.begin(), doneRoots.end(), id) != doneRoots.end()) return false;
-    detachFromParent(id); // remove from parent/roots; parent -> kNoParent
+    if (!t || t->done) return false;
+    // Just a flag: the task keeps its parent and its slot among its siblings, so the DONE
+    // section is a view of the same tree rather than a second one. Layout skips it.
     t->done = true;
-    doneRoots.push_back(id);
     return true;
 }
 
 bool Forest::restoreFromDone(TaskId id) {
     Task* t = get(id);
-    if (!t) return false;
-    auto it = std::find(doneRoots.begin(), doneRoots.end(), id);
-    if (it != doneRoots.end()) doneRoots.erase(it);
-    else detachFromParent(id); // a descendant expanded inside a done subtree
+    if (!t || !t->done) return false;
     t->done = false;
     t->doneAt = 0;             // no longer done -> clear the done timestamp
-    t->parent = kNoParent;
-    roots.push_back(id);
+
+    // It never moved, so clearing the flag already put it back under its original parent in
+    // its original position. The exception: if an ancestor is still done the task would stay
+    // invisible, so promote it to a root where the user can actually see it.
+    if (t->parent != kNoParent && isInDoneSection(t->parent)) {
+        detachFromParent(id);
+        roots.push_back(id);
+    }
     return true;
 }
 
 bool equivalent(const Forest& a, const Forest& b) {
     if (a.nextId != b.nextId) return false;
-    if (a.roots != b.roots || a.doneRoots != b.doneRoots) return false;
+    if (a.roots != b.roots) return false;
     if (a.nodes.size() != b.nodes.size()) return false;
     for (const auto& [id, ta] : a.nodes) {
         const Task* tb = b.get(id);
@@ -139,20 +158,16 @@ bool equivalent(const Forest& a, const Forest& b) {
 
 void Forest::reindexRootsAfterLoad() {
     roots.clear();
-    doneRoots.clear();
     // First pass: any node whose parent is missing becomes a top-level node.
     for (auto& [id, t] : nodes) {
         if (t.parent != kNoParent && !exists(t.parent)) t.parent = kNoParent;
     }
-    // A parent-less node is a canvas root, or a DONE root if flagged done. Ordered by
-    // id for determinism when the loader recorded no explicit order.
-    for (auto& [id, t] : nodes) {
-        if (t.parent != kNoParent) continue;
-        if (t.done) doneRoots.push_back(id);
-        else        roots.push_back(id);
-    }
+    // Every parent-less node is a root, done or not — the done flag decides which view
+    // shows it, not which list holds it. Ordered by id for determinism when the loader
+    // recorded no explicit order.
+    for (auto& [id, t] : nodes)
+        if (t.parent == kNoParent) roots.push_back(id);
     std::sort(roots.begin(), roots.end());
-    std::sort(doneRoots.begin(), doneRoots.end());
 }
 
 } // namespace tt

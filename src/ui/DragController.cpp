@@ -8,14 +8,18 @@ namespace tt {
 namespace {
 
 // The target's (or root-level) children in layout order, excluding the dragged node.
+// Done siblings are skipped: they are not on the canvas, so they have no rect and must not
+// claim a slot in the drop preview.
 std::vector<TaskId> siblingsExcludingDragged(const Forest& f, TaskId parent, TaskId dragged) {
     const std::vector<TaskId>* src = (parent == kNoParent)
         ? &f.roots
         : (f.get(parent) ? &f.get(parent)->children : nullptr);
     std::vector<TaskId> out;
     if (src)
-        for (TaskId id : *src)
-            if (id != dragged) out.push_back(id);
+        for (TaskId id : *src) {
+            const Task* t = f.get(id);
+            if (id != dragged && t && !t->done) out.push_back(id);
+        }
     return out;
 }
 

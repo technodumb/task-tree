@@ -48,11 +48,13 @@ inline bool isDevTask(const std::string& text) {
 
 // Id of the canvas dev node, creating it as a root if none exists. Matches an
 // existing *canvas* root titled "tasktree dev" (case-insensitive); it never scans
-// or reuses DONE nodes, so a done dev node won't be resurrected.
+// or reuses DONE nodes, so a done dev node won't be resurrected. `roots` holds done
+// top-level tasks too, so the done flag has to be checked explicitly — for a root it
+// is exactly "is in the DONE section", since it has no ancestors.
 inline TaskId ensureDevRoot(Forest& forest, std::int64_t createdAt) {
     for (TaskId r : forest.roots) {
         const Task* t = forest.get(r);
-        if (t && iequalsAscii(t->text, kDevNodeTitle)) return r;
+        if (t && !t->done && iequalsAscii(t->text, kDevNodeTitle)) return r;
     }
     return forest.addTask(kDevNodeTitle, kNoParent, createdAt);
 }

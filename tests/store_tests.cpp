@@ -135,10 +135,11 @@ int main() {
         CHECK(store::save(f, path), "save with a done task");
         Forest g;
         CHECK(store::load(g, path), "load with a done task");
-        CHECK(g.doneRoots.size() == 1 && g.doneRoots[0] == d, "doneRoots persisted");
+        CHECK(g.doneSectionRoots().size() == 1 && g.doneSectionRoots()[0] == d,
+              "the DONE section survives the round-trip");
         CHECK(g.get(d) && g.get(d)->done, "done flag persisted");
-        CHECK(std::find(g.roots.begin(), g.roots.end(), d) == g.roots.end(),
-              "done task is not a canvas root");
+        CHECK(std::find(g.roots.begin(), g.roots.end(), d) != g.roots.end(),
+              "a done top-level task is still a root — the flag decides the view");
         CHECK(g.get(d)->children.size() == 1, "done subtree intact");
         fs::remove(path);
     }
@@ -171,8 +172,8 @@ int main() {
         Forest g;
         CHECK(store::loadDb(g, db), "sqlite load succeeds");
         CHECK(equivalent(f, g), "sqlite round-trip is field-for-field identical");
-        CHECK(g.roots == f.roots, "canvas root order preserved");
-        CHECK(g.doneRoots == f.doneRoots, "DONE root order preserved");
+        CHECK(g.roots == f.roots, "top-level order preserved (done tasks included)");
+        CHECK(g.doneSectionRoots() == f.doneSectionRoots(), "DONE section preserved");
         CHECK(g.get(a) && g.get(a)->children == f.get(a)->children, "sibling order preserved");
         CHECK(g.get(a) && g.get(a)->text == "alpha — éà", "UTF-8 text preserved");
         CHECK(g.get(a) && g.get(a)->collapsed, "collapsed preserved");
@@ -457,8 +458,8 @@ int main() {
         Forest back;
         CHECK(store::loadDb(back, db), "migrated real DB loads");
         CHECK(equivalent(live, back), "every real task survives byte-for-byte");
-        std::printf("  real-data check: %zu tasks, %zu roots, %zu done roots\n",
-                    live.size(), live.roots.size(), live.doneRoots.size());
+        std::printf("  real-data check: %zu tasks, %zu top-level, %zu DONE entries\n",
+                    live.size(), live.roots.size(), live.doneSectionRoots().size());
         removeDb(db);
     } else {
         std::printf("  real-data check skipped (set TASKTREE_TEST_JSON to a tasks.json copy)\n");

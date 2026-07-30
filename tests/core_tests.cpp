@@ -176,24 +176,75 @@ int main() {
         CHECK(!f.reparent(p, kid, 0), "reject moving p under its own descendant");
     }
 
-    { // DONE section: markDone / restoreFromDone
+    { // DONE section: a flag, not a move
         Forest f;
         TaskId a = f.addTask("a");
         TaskId b = f.addTask("b", a);
-        CHECK(f.markDone(a), "markDone moves a off the canvas");
+        CHECK(f.markDone(a), "markDone flags a");
         CHECK(f.get(a)->done, "a flagged done");
-        CHECK(std::find(f.roots.begin(), f.roots.end(), a) == f.roots.end(), "a left roots");
-        CHECK(std::find(f.doneRoots.begin(), f.doneRoots.end(), a) != f.doneRoots.end(), "a in doneRoots");
-        CHECK(f.get(b)->parent == a, "subtree stays intact under a done root");
-        CHECK(f.isInDoneSection(a), "done root is in the DONE section");
-        CHECK(f.isInDoneSection(b), "descendant of a done root is in the DONE section");
+        CHECK(std::find(f.roots.begin(), f.roots.end(), a) != f.roots.end(),
+              "a STAYS in roots — being done is not a move");
+        CHECK(f.get(b)->parent == a, "subtree stays intact under a done task");
+        CHECK(f.isInDoneSection(a), "a done task is in the DONE section");
+        CHECK(f.isInDoneSection(b), "so is its descendant");
+        CHECK(f.doneSectionRoots().size() == 1 && f.doneSectionRoots()[0] == a,
+              "a heads the DONE section");
         TaskId canvasRoot = f.addTask("still on canvas");
         CHECK(!f.isInDoneSection(canvasRoot), "a canvas task is not in the DONE section");
         CHECK(!f.markDone(a), "markDone twice is a no-op");
-        CHECK(f.restoreFromDone(a), "restoreFromDone brings a back");
+        CHECK(f.restoreFromDone(a), "restoreFromDone clears the flag");
         CHECK(!f.get(a)->done, "a not done after restore");
-        CHECK(std::find(f.roots.begin(), f.roots.end(), a) != f.roots.end(), "a back on the canvas");
-        CHECK(f.doneRoots.empty(), "doneRoots empty after restore");
+        CHECK(f.doneSectionRoots().empty(), "DONE section empty after restore");
+        CHECK(!f.restoreFromDone(a), "restoring a task that is not done is a no-op");
+    }
+
+    { // a done CHILD keeps its slot, and un-doing puts it back in it
+        Forest f;
+        TaskId p = f.addTask("parent");
+        TaskId x = f.addTask("x", p);
+        TaskId y = f.addTask("y", p);
+        TaskId z = f.addTask("z", p);
+        const std::vector<TaskId> slots{x, y, z};
+
+        CHECK(f.markDone(y), "mark the middle child done");
+        CHECK(f.get(y)->parent == p, "it keeps its parent");
+        CHECK(f.get(p)->children == slots, "and its exact position among its siblings");
+        CHECK(!f.isInDoneSection(p) && !f.isInDoneSection(x) && !f.isInDoneSection(z),
+              "parent and live siblings stay on the canvas");
+        CHECK(f.isInDoneSection(y), "the done child is off the canvas");
+        CHECK(f.doneSectionRoots().size() == 1 && f.doneSectionRoots()[0] == y,
+              "it heads its own DONE entry even though its parent is live");
+
+        CHECK(f.restoreFromDone(y), "un-done");
+        CHECK(f.get(y)->parent == p, "back under the SAME parent");
+        CHECK(f.get(p)->children == slots, "in the SAME position — it never moved");
+
+        // With the parent done too, restoring the child alone has to make it visible:
+        // leaving it in place would hide it inside a DONE subtree.
+        CHECK(f.markDone(p) && f.markDone(y), "both done");
+        CHECK(f.doneSectionRoots().size() == 1 && f.doneSectionRoots()[0] == p,
+              "only the topmost done task heads the section");
+        CHECK(f.restoreFromDone(y), "restore the child while the parent stays done");
+        CHECK(f.get(y)->parent == kNoParent, "promoted to a root so it is visible");
+        CHECK(!f.isInDoneSection(y), "and out of the DONE section");
+        CHECK(f.get(p)->children.size() == 2, "the done parent lost that child");
+    }
+
+    { // the canvas layout skips done subtrees wherever they sit in the tree
+        Forest f;
+        TaskId root = f.addTask("root");
+        TaskId live = f.addTask("live", root);
+        TaskId gone = f.addTask("gone", root);
+        f.addTask("under gone", gone);
+        TaskId doneRoot = f.addTask("done root");
+        f.markDone(gone);
+        f.markDone(doneRoot);
+
+        const auto rects = computeLayout(f, {}, LayoutParams{});
+        CHECK(rects.count(root) == 1 && rects.count(live) == 1, "live tasks are laid out");
+        CHECK(rects.count(gone) == 0, "a done child gets no rect");
+        CHECK(rects.count(doneRoot) == 0, "a done top-level task gets no rect");
+        CHECK(rects.size() == 2, "and nothing under a done task is laid out either");
     }
 
     { // dev fast-path: ttd> detection + dev-root find/create

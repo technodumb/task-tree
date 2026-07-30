@@ -62,8 +62,11 @@ bool loadJson(Forest& f, const std::string& path) {
     }
     f.nextId = std::max<TaskId>(f.nextId, j.value("nextId", f.nextId));
 
-    // Prefer the explicit top-level order if present and still valid.
-    bool ok = j.contains("roots") && j.contains("doneRoots");
+    // Prefer the explicit top-level order if present and still valid. "doneRoots" is a
+    // legacy key: DONE tasks used to live in a second root list, and files written then
+    // still have one. They are ordinary top-level tasks now (their done flag is what puts
+    // them in the DONE section), so both lists append into `roots`.
+    bool ok = j.contains("roots");
     auto readList = [&](const char* key, std::vector<TaskId>& out) {
         for (const auto& r : j[key]) {
             TaskId id = r.get<TaskId>();
@@ -73,10 +76,10 @@ bool loadJson(Forest& f, const std::string& path) {
         }
         return true;
     };
-    if (ok) ok = readList("roots", f.roots) && readList("doneRoots", f.doneRoots);
+    if (ok) ok = readList("roots", f.roots);
+    if (ok && j.contains("doneRoots")) ok = readList("doneRoots", f.roots);
     if (!ok) {
         f.roots.clear();
-        f.doneRoots.clear();
         f.reindexRootsAfterLoad();
     }
     return true;
@@ -100,11 +103,12 @@ bool saveJson(const Forest& f, const std::string& path) {
             {"children", t.children},
         });
     }
+    // No "doneRoots": every top-level task is in `roots` now, done or not (loadJson still
+    // reads the old key so pre-existing files keep working).
     json j = {
-        {"version", 1},
+        {"version", 2},
         {"nextId", f.nextId},
         {"roots", f.roots},
-        {"doneRoots", f.doneRoots},
         {"tasks", std::move(tasks)},
     };
 

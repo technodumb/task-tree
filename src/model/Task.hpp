@@ -19,6 +19,10 @@ struct Task {
     TaskId parent = kNoParent;
     std::string text;               // UTF-8
     std::vector<TaskId> children;   // ordered; sibling order IS the layout order
+    // Done tasks keep their parent and their sibling slot — marking done does NOT move the
+    // node. The DONE section is derived from this flag (see Forest::doneSectionRoots), and
+    // the canvas layout simply skips done subtrees. So un-doing puts the task back exactly
+    // where it was, because it never left.
     bool done = false;
     bool collapsed = false;         // when true, layout hides this node's subtree (chevron toggles)
     int  status = 0;                // 0 = default, 1 = in progress (yellow), 2 = priority (orange)
@@ -26,12 +30,12 @@ struct Task {
     std::int64_t doneAt = 0;        // epoch ms when marked done (0 = not done / null)
 };
 
-// A forest of task trees. `roots` holds the top-level tasks in display order.
+// A forest of task trees. `roots` holds the top-level tasks in display order — done ones
+// included, since a task's position never depends on whether it is done.
 class Forest {
 public:
     std::unordered_map<TaskId, Task> nodes;
-    std::vector<TaskId> roots;      // top-level tasks on the canvas
-    std::vector<TaskId> doneRoots;  // tasks moved to the DONE section (subtrees intact)
+    std::vector<TaskId> roots;      // top-level tasks (parent == kNoParent), done or not
     TaskId nextId = 1;
 
     Task*       get(TaskId id)       { auto it = nodes.find(id); return it == nodes.end() ? nullptr : &it->second; }
@@ -47,8 +51,16 @@ public:
     // Returns true when node == ancestor as well.
     bool isDescendantOf(TaskId node, TaskId ancestor) const;
 
-    // Is `node` in the DONE section (it is, or descends from, a done root)?
+    // Is `node` in the DONE section — i.e. is it done, or does any ancestor's done flag
+    // hide it? Equivalently: is it off the canvas?
     bool isInDoneSection(TaskId node) const;
+
+    // Tops of the DONE section: done tasks whose parent is NOT itself in the DONE section.
+    // Derived, never stored, so it cannot drift from the flags. A done child of a live
+    // parent is one of these — it heads its own DONE entry while staying in place on the
+    // parent's children list. Ordered newest-completed first (doneAt, then id descending
+    // for tasks completed before doneAt was recorded).
+    std::vector<TaskId> doneSectionRoots() const;
 
     // Move `child` under `newParent` (kNoParent → make it a root) at position `index`
     // among the destination's children (clamped). Rejects moves that would create a
@@ -59,12 +71,15 @@ public:
     // Remove a task and its whole subtree. Returns number of tasks removed.
     std::size_t removeSubtree(TaskId id);
 
-    // Move a task (with its subtree) off the canvas into the DONE section. Returns
-    // false if it is already there or invalid.
+    // Flag a task (with its subtree) done, taking it off the canvas and into the DONE
+    // section. The node does not move: parent and sibling slot are untouched. Returns
+    // false if it is already done or invalid.
     bool markDone(TaskId id);
 
-    // Bring a DONE task (with its subtree) back to the canvas as a root. Returns
-    // false if it is not in the DONE section.
+    // Clear the done flag, which puts the task back exactly where it was — same parent,
+    // same position among its siblings. Only when an ancestor is still done (so the task
+    // would remain invisible) is it promoted to a root instead. Returns false if the task
+    // is not done or invalid.
     bool restoreFromDone(TaskId id);
 
     // Rebuild `roots` and repair parent links after a bulk load: any task whose
@@ -76,9 +91,9 @@ private:
     void collectSubtree(TaskId id, std::vector<TaskId>& out) const;
 };
 
-// Deep equality: same ids, same nextId, same roots/doneRoots order, and every Task
-// field (including children order) identical. Deliberately exact — a store migration
-// uses it to prove a round-trip lost nothing, so "close enough" would defeat the point.
+// Deep equality: same ids, same nextId, same roots order, and every Task field (including
+// children order) identical. Deliberately exact — a store migration uses it to prove a
+// round-trip lost nothing, so "close enough" would defeat the point.
 bool equivalent(const Forest& a, const Forest& b);
 
 } // namespace tt

@@ -21,10 +21,27 @@ struct Walker {
     const std::unordered_map<TaskId, Size>& sizes;
     const LayoutParams& p;
     std::unordered_map<TaskId, float> relX; // node centre x relative to its parent's centre
+    std::unordered_map<TaskId, std::vector<TaskId>> kidCache;  // children the canvas shows
 
     Size sizeOf(TaskId id) const {
         auto it = sizes.find(id);
         return it != sizes.end() ? it->second : p.defaultSize;
+    }
+
+    // The children this node contributes to the canvas: none when collapsed (the subtree is
+    // hidden), and never a done one — a done task keeps its slot in the tree but belongs to
+    // the DONE panel, so the canvas skips it and its descendants. Both walks below need the
+    // same list, hence the cache.
+    const std::vector<TaskId>& kidsOf(TaskId id) {
+        static const std::vector<TaskId> kEmpty;
+        const Task* t = forest.get(id);
+        if (!t || t->collapsed) return kEmpty;
+        if (auto it = kidCache.find(id); it != kidCache.end()) return it->second;
+        std::vector<TaskId> live;
+        live.reserve(t->children.size());
+        for (TaskId c : t->children)
+            if (const Task* ct = forest.get(c); ct && !ct->done) live.push_back(c);
+        return kidCache.emplace(id, std::move(live)).first->second;
     }
 
     // Place a row of sibling subtrees (given their contours) left to right so no two
@@ -57,10 +74,8 @@ struct Walker {
     Contour firstWalk(TaskId id) {
         const Size sz = sizeOf(id);
         const float hw = sz.w * 0.5f;
-        const Task* t = forest.get(id);
-        // A collapsed node is laid out as a leaf — its subtree is hidden entirely.
-        static const std::vector<TaskId> kEmpty;
-        const std::vector<TaskId>& kids = (t && !t->collapsed) ? t->children : kEmpty;
+        // Collapsed or all-done children => laid out as a leaf.
+        const std::vector<TaskId>& kids = kidsOf(id);
 
         if (kids.empty()) {
             return Contour{{-hw}, {hw}};
@@ -103,19 +118,26 @@ std::unordered_map<TaskId, Rect> computeLayout(const Forest& forest,
                                                const std::unordered_map<TaskId, Size>& sizes,
                                                const LayoutParams& params) {
     std::unordered_map<TaskId, Rect> out;
-    if (forest.roots.empty()) return out;
 
-    Walker w{forest, sizes, params, {}};
+    Walker w{forest, sizes, params, {}, {}};
+
+    // Top-level tasks the canvas shows: `roots` holds done ones too (they keep their slot),
+    // and those belong to the DONE panel instead.
+    std::vector<TaskId> roots;
+    roots.reserve(forest.roots.size());
+    for (TaskId r : forest.roots)
+        if (const Task* t = forest.get(r); t && !t->done) roots.push_back(r);
+    if (roots.empty()) return out;
 
     // First walk each root (fills relX for all descendants) then pack the roots as
     // siblings of an implicit super-root centred at x = 0.
     std::vector<Contour> rootContours;
-    rootContours.reserve(forest.roots.size());
-    for (TaskId r : forest.roots) rootContours.push_back(w.firstWalk(r));
+    rootContours.reserve(roots.size());
+    for (TaskId r : roots) rootContours.push_back(w.firstWalk(r));
     const std::vector<float> rootXs = w.placeSiblings(rootContours);
     const float superCentre = (rootXs.front() + rootXs.back()) * 0.5f;
-    for (std::size_t i = 0; i < forest.roots.size(); ++i)
-        w.relX[forest.roots[i]] = rootXs[i] - superCentre;
+    for (std::size_t i = 0; i < roots.size(); ++i)
+        w.relX[roots[i]] = rootXs[i] - superCentre;
 
     // Assign depth and absolute centre-x to every node (pre-order DFS), and gather
     // the max node height on each layer.
@@ -125,7 +147,7 @@ std::unordered_map<TaskId, Rect> computeLayout(const Forest& forest,
 
     struct Frame { TaskId id; int d; float parentAbsX; };
     std::vector<Frame> stack;
-    for (auto it = forest.roots.rbegin(); it != forest.roots.rend(); ++it)
+    for (auto it = roots.rbegin(); it != roots.rend(); ++it)
         stack.push_back({*it, 0, 0.f});
 
     while (!stack.empty()) {
@@ -139,10 +161,9 @@ std::unordered_map<TaskId, Rect> computeLayout(const Forest& forest,
         if (static_cast<int>(layerMaxH.size()) <= f.d) layerMaxH.resize(f.d + 1, 0.f);
         layerMaxH[f.d] = std::max(layerMaxH[f.d], sz.h);
 
-        if (const Task* t = forest.get(f.id); t && !t->collapsed) {
-            for (auto it = t->children.rbegin(); it != t->children.rend(); ++it)
-                stack.push_back({*it, f.d + 1, ax});
-        }
+        const std::vector<TaskId>& kids = w.kidsOf(f.id);
+        for (auto it = kids.rbegin(); it != kids.rend(); ++it)
+            stack.push_back({*it, f.d + 1, ax});
     }
 
     // Per-layer top y: each layer starts below the tallest node of the layer above.

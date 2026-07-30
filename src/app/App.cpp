@@ -638,8 +638,10 @@ void App::flashPath(TaskId leaf) {
 
 std::string App::buildTreeOutline(TaskId exclude) const {
     // One line per canvas node: "[id] parent=<pid|none>: text". Explicit parent ids
-    // (not indentation) so the model reconstructs the tree unambiguously. Pre-order
-    // over canvas roots (DONE roots live in a separate list, so they're excluded).
+    // (not indentation) so the model reconstructs the tree unambiguously. Pre-order over
+    // the canvas: `roots` includes done top-level tasks, and a done task can sit anywhere
+    // in the tree, so done subtrees are skipped here — the classifier must never be offered
+    // a DONE node as a parent.
     std::string out;
     std::vector<TaskId> stack;
     for (auto it = forest_.roots.rbegin(); it != forest_.roots.rend(); ++it)
@@ -650,6 +652,7 @@ std::string App::buildTreeOutline(TaskId exclude) const {
         if (id == exclude) continue; // skip the just-created node
         const Task* t = forest_.get(id);
         if (!t) continue;
+        if (t->done) continue;       // off the canvas, along with everything under it
         out += "[" + std::to_string(id) + "] parent=";
         out += (t->parent == kNoParent) ? "none" : std::to_string(t->parent);
         out += ": " + t->text + "\n";
@@ -890,18 +893,10 @@ void App::layoutDonePanel(int winW, int winH) {
     donePanel_ = L;
 
     // Measure card heights, clamp scroll, then position (screen coords, scrolled).
-    // Flatten the expanded DONE tree in display order (pre-order) with depth. Top-level
-    // roots are shown latest-completed first (display-only sort; the persisted doneRoots
-    // order is left untouched). Primary key is doneAt (newest first); items with an
-    // unknown doneAt (0, completed before the field existed) fall back to completion
-    // order — markDone appends, so reversing doneRoots puts the most recent first, and a
-    // stable sort keeps that fallback order within the undated group.
-    std::vector<TaskId> order(forest_.doneRoots.rbegin(), forest_.doneRoots.rend());
-    std::stable_sort(order.begin(), order.end(), [&](TaskId a, TaskId b) {
-        const Task* ta = forest_.get(a);
-        const Task* tb = forest_.get(b);
-        return (ta ? ta->doneAt : 0) > (tb ? tb->doneAt : 0);
-    });
+    // Flatten the expanded DONE tree in display order (pre-order) with depth. The section's
+    // top entries are derived from the done flags (a done task keeps its place in the tree),
+    // already ordered latest-completed first.
+    const std::vector<TaskId> order = forest_.doneSectionRoots();
     std::vector<std::pair<TaskId, int>> flat;
     {
         std::vector<std::pair<TaskId, int>> stack;

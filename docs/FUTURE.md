@@ -144,10 +144,12 @@ Everything below follows from that, and none of it is reachable without it.
 
 **Shape if built**
 - `tasks(id, parent, ord, text, done, collapsed, status, created_at, done_at)` +
-  `meta(key, value)` for `next_id` / schema version. `roots` and `doneRoots` become derived
-  (`parent IS NULL`, plus a done flag) rather than two stored vectors. Sibling order lives in
+  `meta(key, value)` for `next_id` / schema version. `roots` and the DONE section become
+  derived (`parent = 0`, plus the done flag) rather than stored vectors. Sibling order lives in
   `ord` — which finally gives the sibling-reordering item under *interaction & motion* a home,
   since `Forest::reparent` takes an index today that every caller ignores.
+  *(Built on `v3`; see `docs/plans/v3.md` for what actually shipped, including `deleted_at`
+  soft delete and done-as-a-flag.)*
 - Keep whole-forest `load`/`save` first (load at start, save as one transaction) so `App` and
   its 12 call sites don't change on day one; move to incremental row writes after that works.
 - WAL, `synchronous=NORMAL`, single writer.
