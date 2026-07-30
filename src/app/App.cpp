@@ -842,13 +842,12 @@ void App::drawScene(int winW, int winH, float dpr) {
             const palette::ModeInfo* info = palette::infoFor(menu ? menuHighlight() : pmode_);
             style.tinted = true;
             style.border = paletteTint();
-            style.chip = info ? (menu ? std::string(info->name) : std::string(info->name) + ":")
-                              : std::string{};
+            style.chip = info ? std::string(info->name) : std::string{};
             // Every mode reserves the width of the longest label, so switching modes never
             // shifts the text after it.
             for (const palette::ModeInfo& i : palette::modes())
                 style.chipWidth = std::max(style.chipWidth,
-                                           renderer_.measureTextWidth(std::string(i.name) + ":") + 24.f);
+                                           renderer_.measureTextWidth(std::string(i.name)) + 24.f);
             if (menu) {
                 barText.clear();
             } else {
