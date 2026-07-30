@@ -550,6 +550,75 @@ int main() {
         fs::remove(js);
     }
 
+    // ---- An unreadable store is moved aside, never written over ------------------
+    {
+        const std::string js = tmpFile("corrupt.json").string();
+        { std::ofstream o(js); o << "this is not json {{{"; }
+        const std::string body = readAll(js);
+
+        Forest g;
+        CHECK(!store::loadJson(g, js), "a corrupt file fails to load");
+        CHECK(fs::exists(js), "and is still on disk at that point");
+
+        const std::string kept = store::quarantine(js);
+        CHECK(!kept.empty(), "quarantine returns the new path");
+        CHECK(!fs::exists(js), "the original path is now free for a fresh store");
+        CHECK(fs::exists(kept), "the unreadable file still exists under its new name");
+        CHECK(readAll(kept) == body, "byte-for-byte — nothing was rewritten");
+
+        // A second failure must not clobber the first rescue.
+        { std::ofstream o(js); o << "also broken"; }
+        const std::string kept2 = store::quarantine(js);
+        CHECK(!kept2.empty() && kept2 != kept, "a second rescue picks a fresh name");
+        CHECK(readAll(kept) == body, "the first rescue is untouched");
+
+        fs::remove(kept);
+        fs::remove(kept2);
+
+        // A DB and its WAL sidecars travel together.
+        Forest f;
+        f.addTask("in a db");
+        const std::string db = tmpFile("quarantine.db").string();
+        removeDb(db);
+        CHECK(store::saveDb(f, db), "seed a DB");
+        { std::ofstream o(db + "-wal", std::ios::binary); o << "sidecar"; }
+        const std::string keptDb = store::quarantine(db);
+        CHECK(!keptDb.empty() && !fs::exists(db), "the DB moved aside");
+        CHECK(fs::exists(keptDb + "-wal"), "its -wal came along");
+        removeDb(keptDb);
+
+        CHECK(store::quarantine(tmpFile("never_existed.json").string()).empty(),
+              "nothing to quarantine -> empty result");
+    }
+
+    // ---- A store from a newer build is identified, not touched -------------------
+    {
+        Forest f;
+        f.addTask("from the future");
+        const std::string db = tmpFile("future.db").string();
+        removeDb(db);
+        CHECK(store::saveDb(f, db), "seed");
+        CHECK(store::dbSchemaVersion(db) == store::supportedDbSchemaVersion(),
+              "a DB we just wrote reports our own schema version");
+
+        {   // stamp it as newer than this build understands
+            sqlite3* h = nullptr;
+            CHECK(sqlite3_open(db.c_str(), &h) == SQLITE_OK, "reopen to bump the version");
+            const std::string bump =
+                "PRAGMA user_version=" + std::to_string(store::supportedDbSchemaVersion() + 7);
+            CHECK(sqlite3_exec(h, bump.c_str(), nullptr, nullptr, nullptr) == SQLITE_OK, "bump");
+            sqlite3_close(h);
+        }
+        CHECK(store::dbSchemaVersion(db) > store::supportedDbSchemaVersion(),
+              "a newer store is recognised as newer");
+        Forest g;
+        CHECK(!store::loadDb(g, db), "and refuses to load rather than misread it");
+        CHECK(fs::exists(db), "the file is left exactly where it was");
+        CHECK(store::dbSchemaVersion(tmpFile("no_such.db").string()) == -1,
+              "a missing file has no schema version");
+        removeDb(db);
+    }
+
     // ---- Real data check (opt-in): TASKTREE_TEST_JSON=<a copy of tasks.json> ---
     // Proves the migration on the actual file rather than on synthetic fixtures.
     if (const char* real = std::getenv("TASKTREE_TEST_JSON")) {

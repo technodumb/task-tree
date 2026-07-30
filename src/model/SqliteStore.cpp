@@ -325,6 +325,19 @@ bool saveDb(const Forest& f, const std::string& path, const Forest* baseline) {
     return db.exec("COMMIT");
 }
 
+int supportedDbSchemaVersion() { return kSchemaVersion; }
+
+int dbSchemaVersion(const std::string& path) {
+    std::error_code ec;
+    if (!fs::exists(path, ec)) return -1;
+    Db db;
+    // Deliberately NOT openDb: that applies the schema and the upgrade ladder, and this is
+    // asked precisely when we may have no business writing to the file at all.
+    if (sqlite3_open_v2(path.c_str(), &db.h, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK)
+        return -1;
+    return userVersion(db);
+}
+
 std::vector<DeletedRow> deletedRows(const std::string& path) {
     std::vector<DeletedRow> out;
     std::error_code ec;

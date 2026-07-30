@@ -109,7 +109,37 @@ int main() {
                                  "Nothing was changed.\n", jsonPath.c_str());
         }
     }
-    store::load(forest, tasksPath); // ok if absent -> empty forest
+    // A load that fails on a file that EXISTS means the data is unreadable, not absent — and
+    // carrying on would let the first save replace it with an empty store. So: never write
+    // over a store we could not read.
+    if (!store::load(forest, tasksPath) && std::filesystem::exists(tasksPath)) {
+        const int have = store::isDbPath(tasksPath) ? store::dbSchemaVersion(tasksPath) : -1;
+        if (have > store::supportedDbSchemaVersion()) {
+            // Not damaged — just newer than this binary understands. Touching it (even to
+            // move it aside) would be wrong; the user wants their newer build back.
+            std::fprintf(stderr,
+                         "Store: %s was written by a newer TaskTree (schema %d, this build "
+                         "reads %d). Refusing to touch it. Run the newer build, or move the "
+                         "file aside yourself.\n",
+                         tasksPath.c_str(), have, store::supportedDbSchemaVersion());
+            nvgDeleteGL3(vg);
+            platform.shutdown();
+            return 1;
+        }
+        const std::string kept = store::quarantine(tasksPath);
+        if (kept.empty()) {
+            std::fprintf(stderr,
+                         "Store: %s is unreadable and could not be moved aside. Refusing to "
+                         "start, so nothing overwrites it.\n", tasksPath.c_str());
+            nvgDeleteGL3(vg);
+            platform.shutdown();
+            return 1;
+        }
+        std::fprintf(stderr,
+                     "Store: %s was unreadable — kept as %s and starting with an empty tree. "
+                     "Nothing was discarded.\n", tasksPath.c_str(), kept.c_str());
+        forest = Forest{};
+    }
 
     // Classifier selection (all cloud/local LLMs go through the one OpenAI-compatible
     // client): CEREBRAS_API_KEY env -> Cerebras; else config's OpenAI-compatible endpoint

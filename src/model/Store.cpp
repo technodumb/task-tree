@@ -144,6 +144,24 @@ bool loadJson(Forest& f, const std::string& path) {
     return true;
 }
 
+std::string quarantine(const std::string& path) {
+    std::error_code ec;
+    if (!fs::exists(path, ec)) return {};
+    for (int n = 0; n < 1000; ++n) {
+        const std::string dest = path + ".unreadable" + (n == 0 ? "" : "-" + std::to_string(n));
+        if (fs::exists(dest, ec)) continue;          // never clobber an earlier rescue
+        fs::rename(path, dest, ec);
+        if (ec) return {};
+        // A SQLite store is up to three files; its sidecars belong with it.
+        for (const char* suffix : {"-wal", "-shm"}) {
+            std::error_code side;
+            if (fs::exists(path + suffix, side)) fs::rename(path + suffix, dest + suffix, side);
+        }
+        return dest;
+    }
+    return {};
+}
+
 bool jsonTaskCount(const std::string& path, std::size_t& objects, std::size_t& distinct) {
     objects = distinct = 0;
     std::ifstream in(path);

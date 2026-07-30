@@ -55,6 +55,21 @@ bool saveJson(const Forest& f, const std::string& path);
 bool loadDb(Forest& f, const std::string& path);
 bool saveDb(const Forest& f, const std::string& path, const Forest* baseline = nullptr);
 
+// Move an unreadable store aside instead of writing over it, returning the new path (empty
+// if it could not be moved). A load that fails on a file that EXISTS means the data is
+// unreadable, not absent — and the app's next save would otherwise replace it with an empty
+// store, destroying whatever was still recoverable. Picks an unused `.unreadable[-N]` suffix
+// so successive rescues never overwrite each other, and carries a SQLite store's
+// `-wal`/`-shm` sidecars along with it.
+std::string quarantine(const std::string& path);
+
+// The schema version stamped in a SQLite store, or -1 if the file is missing or not readable
+// as a DB. Greater than supportedDbSchemaVersion() means it was written by a NEWER build:
+// that data is fine, this binary simply cannot read it, so it must be left strictly alone
+// rather than quarantined or overwritten.
+int dbSchemaVersion(const std::string& path);
+int supportedDbSchemaVersion();
+
 // How many tasks a JSON file *declares*, counted from the file itself rather than from a
 // loaded Forest — a loader's own output cannot be used to check that loader. `objects` is
 // task entries with a usable (positive integer) id; `distinct` is how many unique ids those
