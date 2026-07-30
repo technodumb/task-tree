@@ -611,9 +611,14 @@ int main() {
         }
         CHECK(store::dbSchemaVersion(db) > store::supportedDbSchemaVersion(),
               "a newer store is recognised as newer");
+        const std::string before = readAll(db);
         Forest g;
         CHECK(!store::loadDb(g, db), "and refuses to load rather than misread it");
         CHECK(fs::exists(db), "the file is left exactly where it was");
+        CHECK(readAll(db) == before,
+              "and byte-for-byte unchanged — refusing must not write pragmas or an index");
+        CHECK(!fs::exists(db + "-wal") && !fs::exists(db + "-shm"),
+              "no sidecars created either");
         CHECK(store::dbSchemaVersion(tmpFile("no_such.db").string()) == -1,
               "a missing file has no schema version");
         removeDb(db);

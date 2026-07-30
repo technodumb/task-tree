@@ -129,6 +129,13 @@ bool openDb(Db& db, const std::string& path, bool create) {
     // A second process (a CLI, an agent) may hold the write lock briefly; wait rather
     // than fail. WAL is what lets that reader work while the app has the DB open.
     sqlite3_busy_timeout(db.h, 3000);
+
+    // Bail out on a store from a NEWER build before writing a single byte to it. Setting the
+    // pragmas or running CREATE ... IF NOT EXISTS first would persist a journal-mode change and
+    // add our index to a file we have just decided we must not touch.
+    const int found = userVersion(db);
+    if (found < 0 || found > kSchemaVersion) return false;
+
     db.exec("PRAGMA journal_mode=WAL");
     db.exec("PRAGMA synchronous=NORMAL");
     if (!db.exec(kSchema)) return false;
