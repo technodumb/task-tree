@@ -2,10 +2,10 @@
 
 ## Default branch: `v2`
 
-Active development happens on **`v2`** (worktree `../TaskTree-v2`). At session start,
-check you're on `v2` and switch to it if not — don't start work on `main` or `v1`.
-`v1` (worktree `../TaskTree`) is the maintenance line; `main` only tracks whatever the
-current line has published. Commit ttd work to `v2`; **never push**.
+Active development happens on **`v2`**, checked out in this folder (the main repo
+checkout, `Out/TaskTree`). At session start, check you're on `v2` and switch to it if
+not — don't start work on `main` or `v1`. `v1` is the maintenance line; `main` only
+tracks whatever the current line has published. Commit ttd work to `v2`; **never push**.
 
 ## ttd dev workflow — run this at the START of every session
 
