@@ -49,7 +49,7 @@ bool Forest::isInDoneSection(TaskId node) const {
     for (std::size_t steps = 0; cur != kNoParent && steps <= nodes.size(); ++steps) {
         const Task* t = get(cur);
         if (!t) break;
-        if (t->done) return true;
+        if (t->isDone()) return true;
         cur = t->parent;
     }
     return false;
@@ -58,7 +58,7 @@ bool Forest::isInDoneSection(TaskId node) const {
 std::vector<TaskId> Forest::doneSectionRoots() const {
     std::vector<TaskId> out;
     for (const auto& [id, t] : nodes)
-        if (t.done && !isInDoneSection(t.parent)) out.push_back(id);
+        if (t.isDone() && !isInDoneSection(t.parent)) out.push_back(id);
     // Newest completion first. Tasks finished before doneAt existed have doneAt == 0 and
     // fall back to id order (later id = created later = almost certainly finished later).
     std::sort(out.begin(), out.end(), [this](TaskId a, TaskId b) {
@@ -115,20 +115,19 @@ std::size_t Forest::removeSubtree(TaskId id) {
     return victims.size();
 }
 
-bool Forest::markDone(TaskId id) {
+bool Forest::markDone(TaskId id, std::int64_t doneAtMs) {
     Task* t = get(id);
-    if (!t || t->done) return false;
-    // Just a flag: the task keeps its parent and its slot among its siblings, so the DONE
-    // section is a view of the same tree rather than a second one. Layout skips it.
-    t->done = true;
+    if (!t || t->isDone()) return false;
+    // Just a timestamp: the task keeps its parent and its slot among its siblings, so the
+    // DONE section is a view of the same tree rather than a second one. Layout skips it.
+    t->doneAt = (doneAtMs != 0) ? doneAtMs : kDoneAtUnknown;
     return true;
 }
 
 bool Forest::restoreFromDone(TaskId id) {
     Task* t = get(id);
-    if (!t || !t->done) return false;
-    t->done = false;
-    t->doneAt = 0;             // no longer done -> clear the done timestamp
+    if (!t || !t->isDone()) return false;
+    t->doneAt = 0;             // clearing the timestamp IS "not done"
 
     // It never moved, so clearing the flag already put it back under its original parent in
     // its original position. The exception: if an ancestor is still done the task would stay
@@ -148,7 +147,7 @@ bool equivalent(const Forest& a, const Forest& b) {
         const Task* tb = b.get(id);
         if (!tb) return false;
         if (ta.id != tb->id || ta.parent != tb->parent || ta.text != tb->text ||
-            ta.done != tb->done || ta.collapsed != tb->collapsed || ta.status != tb->status ||
+            ta.collapsed != tb->collapsed || ta.status != tb->status ||
             ta.createdAt != tb->createdAt || ta.doneAt != tb->doneAt ||
             ta.children != tb->children)
             return false;

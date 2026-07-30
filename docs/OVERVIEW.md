@@ -63,13 +63,15 @@ The **pure layers** (`model/`, `layout/`) have zero external deps and are unit-t
 (`tests/`), so they're stack-agnostic and fast to reason about. `App` is the orchestrator
 that ties model → layout → render and routes input.
 
-**Data model** (`model/Task.hpp`): `Task{id, parent, text, children[], done, collapsed,
-status, createdAt, doneAt}`; `Forest{nodes, roots[], nextId}`. Key ops: `addTask`,
+**Data model** (`model/Task.hpp`): `Task{id, parent, text, children[], collapsed, status,
+createdAt, doneAt}`; `Forest{nodes, roots[], nextId}`. Key ops: `addTask`,
 `reparent` (with cycle prevention), `markDone`/`restoreFromDone`, `isInDoneSection`,
 `removeSubtree`. Sibling order = children-vector order = layout order.
-**Done is a flag, not a move** (v3): `markDone` only sets `Task::done`, so the task keeps its
-parent and its slot; the canvas layout skips done subtrees and the DONE panel is derived via
-`doneSectionRoots()`. That is why un-doing restores a task to exactly where it was, including
+**Done is a timestamp, not a move** (v3): there is no `done` boolean — `doneAt` carries both
+the state and the date (`0` not done, `>0` done then, `kDoneAtUnknown` done at an unknown
+time), exactly as `deleted_at` does in the store, so the two can never disagree.
+`markDone(id, whenMs)` only sets that field, so the task keeps its parent and its slot; the
+canvas layout skips done subtrees and the DONE panel is derived via `doneSectionRoots()`. That is why un-doing restores a task to exactly where it was, including
 a done child of a live parent — and why `roots[]` holds done top-level tasks too, which any
 canvas-walking code must filter (see `DevRoute::ensureDevRoot`, `App::buildTreeOutline`).
 Undo/redo is a separate pure `model/History` — a bounded stack of whole-`Forest`

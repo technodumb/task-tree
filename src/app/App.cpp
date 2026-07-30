@@ -652,7 +652,7 @@ std::string App::buildTreeOutline(TaskId exclude) const {
         if (id == exclude) continue; // skip the just-created node
         const Task* t = forest_.get(id);
         if (!t) continue;
-        if (t->done) continue;       // off the canvas, along with everything under it
+        if (t->isDone()) continue;   // off the canvas, along with everything under it
         out += "[" + std::to_string(id) + "] parent=";
         out += (t->parent == kNoParent) ? "none" : std::to_string(t->parent);
         out += ": " + t->text + "\n";
@@ -889,7 +889,7 @@ void App::layoutDonePanel(int winW, int winH) {
     L.contentClipTop = L.panel.y + titleH;
     L.contentClipBottom = L.panel.bottom() - 8.f;
     for (const auto& [id, t] : forest_.nodes)
-        if (t.done) ++L.itemCount;
+        if (t.isDone()) ++L.itemCount;
     donePanel_ = L;
 
     // Measure card heights, clamp scroll, then position (screen coords, scrolled).
@@ -987,9 +987,8 @@ void App::handleDoubleClick() {
         if (id != 0) {
             if (drag_.active()) drag_.cancel();
             Forest before = forest_;
-            if (forest_.markDone(id)) {
+            if (forest_.markDone(id, nowMs())) {   // the timestamp IS the done state
                 history_.record(std::move(before));
-                if (Task* t = forest_.get(id)) t->doneAt = nowMs();  // record done date
                 forceRelayout();
                 save();
             }

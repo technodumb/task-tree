@@ -18,7 +18,7 @@ std::vector<TaskId> siblingsExcludingDragged(const Forest& f, TaskId parent, Tas
     if (src)
         for (TaskId id : *src) {
             const Task* t = f.get(id);
-            if (id != dragged && t && !t->done) out.push_back(id);
+            if (id != dragged && t && !t->isDone()) out.push_back(id);
         }
     return out;
 }

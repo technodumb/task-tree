@@ -54,7 +54,7 @@ inline bool isDevTask(const std::string& text) {
 inline TaskId ensureDevRoot(Forest& forest, std::int64_t createdAt) {
     for (TaskId r : forest.roots) {
         const Task* t = forest.get(r);
-        if (t && !t->done && iequalsAscii(t->text, kDevNodeTitle)) return r;
+        if (t && !t->isDone() && iequalsAscii(t->text, kDevNodeTitle)) return r;
     }
     return forest.addTask(kDevNodeTitle, kNoParent, createdAt);
 }

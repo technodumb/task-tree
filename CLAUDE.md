@@ -21,11 +21,13 @@ be asked:
    `scripts/ttd-scan.sh` both use. Collect **canvas** (non-DONE) tasks whose text starts
    with `ttd>` (case-insensitive, optional space). These are dev tasks for you.
    In the DB there are no `roots`/`children` lists: a task is top-level when `parent = 0`
-   and `ord` is its position among its siblings. **Being done is a flag, not a move** — a
-   done task keeps its parent and slot, so a task is off the canvas when *any* task on its
-   parent chain (itself included) has `done = 1`, and the DONE section's top entries are the
-   done tasks whose parent chain holds no other done task. Deletion is soft: rows with
-   `deleted_at != 0` are retired and must be excluded from every query.
+   and `ord` is its position among its siblings. **There are no booleans: a timestamp is the
+   state.** `done_at = 0` is not done, `> 0` is done at that epoch-ms, and `-1` is done at an
+   unknown time (finished before the date was recorded — 43 of the existing tasks). Likewise
+   `deleted_at != 0` means retired, and those rows must be excluded from every query.
+   **Completion is not a move** — a done task keeps its parent and slot — so a task is off
+   the canvas when *any* task on its parent chain (itself included) has `done_at != 0`, and
+   the DONE section's top entries are the done tasks whose parent chain holds no other.
 2. If there are any clearly-scoped ones, **start implementing them now**. For each:
    implement → build (`cmake --build build -j`) → `ctest` → commit (one focused commit
    per task; **never push**).

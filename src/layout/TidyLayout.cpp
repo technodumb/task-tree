@@ -40,7 +40,7 @@ struct Walker {
         std::vector<TaskId> live;
         live.reserve(t->children.size());
         for (TaskId c : t->children)
-            if (const Task* ct = forest.get(c); ct && !ct->done) live.push_back(c);
+            if (const Task* ct = forest.get(c); ct && !ct->isDone()) live.push_back(c);
         return kidCache.emplace(id, std::move(live)).first->second;
     }
 
@@ -126,7 +126,7 @@ std::unordered_map<TaskId, Rect> computeLayout(const Forest& forest,
     std::vector<TaskId> roots;
     roots.reserve(forest.roots.size());
     for (TaskId r : forest.roots)
-        if (const Task* t = forest.get(r); t && !t->done) roots.push_back(r);
+        if (const Task* t = forest.get(r); t && !t->isDone()) roots.push_back(r);
     if (roots.empty()) return out;
 
     // First walk each root (fills relX for all descendants) then pack the roots as

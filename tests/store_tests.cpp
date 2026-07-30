@@ -137,7 +137,7 @@ int main() {
         CHECK(store::load(g, path), "load with a done task");
         CHECK(g.doneSectionRoots().size() == 1 && g.doneSectionRoots()[0] == d,
               "the DONE section survives the round-trip");
-        CHECK(g.get(d) && g.get(d)->done, "done flag persisted");
+        CHECK(g.get(d) && g.get(d)->isDone(), "completion persisted");
         CHECK(std::find(g.roots.begin(), g.roots.end(), d) != g.roots.end(),
               "a done top-level task is still a root — the flag decides the view");
         CHECK(g.get(d)->children.size() == 1, "done subtree intact");
@@ -374,11 +374,12 @@ int main() {
         removeDb(db);
     }
 
-    // ---- Schema upgrade from a version-1 DB (no deleted_at column) --------------
+    // ---- Schema upgrade 1 -> 3 (no deleted_at; `done` boolean still present) -----
+    // The dangerous step is folding `done` into done_at: tasks completed before the date
+    // was recorded are done=1 with done_at=0, and must stay done.
     {
         const std::string db = tmpFile("schema_v1.db").string();
         removeDb(db);
-        // Build the old schema by hand, with rows in it.
         {
             sqlite3* h = nullptr;
             CHECK(sqlite3_open(db.c_str(), &h) == SQLITE_OK, "create a v1 DB");
@@ -389,21 +390,33 @@ int main() {
                 " status INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT 0,"
                 " done_at INTEGER NOT NULL DEFAULT 0);"
                 "CREATE TABLE meta(key TEXT PRIMARY KEY, value NOT NULL);"
-                "INSERT INTO tasks(id,parent,ord,text) VALUES(1,0,0,'old root'),(2,1,0,'old child');"
-                "INSERT INTO meta VALUES('next_id',3);"
+                "INSERT INTO tasks(id,parent,ord,text,done,done_at) VALUES"
+                "  (1,0,0,'old root',0,0),"          // live
+                "  (2,1,0,'old child',0,0),"         // live child
+                "  (3,0,1,'dated done',1,1700000000000),"   // done, with a date
+                "  (4,0,2,'undated done',1,0),"      // done, no date  <-- the risky one
+                "  (5,0,3,'stale done_at',0,1699999999999);"  // not done, junk date
+                "INSERT INTO meta VALUES('next_id',6);"
                 "PRAGMA user_version=1;";
             CHECK(sqlite3_exec(h, v1, nullptr, nullptr, nullptr) == SQLITE_OK, "seed v1 rows");
             sqlite3_close(h);
         }
-        // Opening it must add the column, keep both rows, and bump the version.
         Forest g;
         CHECK(store::loadDb(g, db), "a v1 DB still loads");
-        CHECK(g.size() == 2, "both old rows survived the upgrade");
+        CHECK(g.size() == 5, "every old row survived the upgrade");
         CHECK(g.get(1) && g.get(1)->text == "old root", "old data intact");
         CHECK(g.get(2) && g.get(2)->parent == 1, "old parent link intact");
-        CHECK(g.nextId == 3, "old next_id intact");
-        CHECK(rawUserVersion(db) == 2, "user_version bumped to 2");
-        CHECK(rawCount(db, "deleted_at=0") == 2, "existing rows are marked live");
+        CHECK(g.nextId == 6, "old next_id intact");
+        CHECK(rawUserVersion(db) == 3, "user_version bumped to 3");
+        CHECK(rawCount(db, "deleted_at=0") == 5, "existing rows are marked live");
+
+        CHECK(g.get(3) && g.get(3)->isDone(), "a dated done task is still done");
+        CHECK(g.get(3)->doneAt == 1700000000000, "and keeps its real date");
+        CHECK(g.get(4) && g.get(4)->isDone(), "an UNDATED done task is still done");
+        CHECK(g.get(4)->doneAt == kDoneAtUnknown, "recorded as done-at-unknown, not fabricated");
+        CHECK(g.get(5) && !g.get(5)->isDone(), "a not-done row with a stale date is not done");
+        CHECK(g.get(5)->doneAt == 0, "its meaningless timestamp was cleared");
+        CHECK(g.doneSectionRoots().size() == 2, "both done tasks head DONE entries");
         removeDb(db);
     }
 

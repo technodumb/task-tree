@@ -50,11 +50,19 @@ bool loadJson(Forest& f, const std::string& path) {
         if (t.id == 0) continue;
         t.parent = jt.value("parent", kNoParent);
         t.text = jt.value("text", std::string{});
-        t.done = jt.value("done", false);
         t.collapsed = jt.value("collapsed", false);
         t.status = jt.value("status", 0);
         t.createdAt = jt.value("createdAt", std::int64_t{0});
-        t.doneAt = jt.value("doneAt", std::int64_t{0});   // 0/null for pre-existing tasks
+        t.doneAt = jt.value("doneAt", std::int64_t{0});
+        // "done" is a legacy key: completion used to be a boolean beside the timestamp, and
+        // tasks finished before the timestamp existed have done=true with doneAt=0. Those
+        // must become kDoneAtUnknown, or reading an old file would un-complete every one of
+        // them. A doneAt on a not-done row was always meaningless, so it is cleared.
+        if (jt.contains("done")) {
+            const bool wasDone = jt.value("done", false);
+            if (wasDone && t.doneAt == 0)  t.doneAt = kDoneAtUnknown;
+            if (!wasDone && t.doneAt != 0) t.doneAt = 0;
+        }
         for (const auto& c : jt.value("children", json::array()))
             t.children.push_back(c.get<TaskId>());
         f.nextId = std::max<TaskId>(f.nextId, t.id + 1);
@@ -95,7 +103,6 @@ bool saveJson(const Forest& f, const std::string& path) {
             {"id", t.id},
             {"parent", t.parent},
             {"text", t.text},
-            {"done", t.done},
             {"collapsed", t.collapsed},
             {"status", t.status},
             {"createdAt", t.createdAt},

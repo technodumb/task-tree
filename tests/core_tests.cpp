@@ -181,7 +181,7 @@ int main() {
         TaskId a = f.addTask("a");
         TaskId b = f.addTask("b", a);
         CHECK(f.markDone(a), "markDone flags a");
-        CHECK(f.get(a)->done, "a flagged done");
+        CHECK(f.get(a)->isDone(), "a is done");
         CHECK(std::find(f.roots.begin(), f.roots.end(), a) != f.roots.end(),
               "a STAYS in roots — being done is not a move");
         CHECK(f.get(b)->parent == a, "subtree stays intact under a done task");
@@ -193,7 +193,7 @@ int main() {
         CHECK(!f.isInDoneSection(canvasRoot), "a canvas task is not in the DONE section");
         CHECK(!f.markDone(a), "markDone twice is a no-op");
         CHECK(f.restoreFromDone(a), "restoreFromDone clears the flag");
-        CHECK(!f.get(a)->done, "a not done after restore");
+        CHECK(!f.get(a)->isDone(), "a not done after restore");
         CHECK(f.doneSectionRoots().empty(), "DONE section empty after restore");
         CHECK(!f.restoreFromDone(a), "restoring a task that is not done is a no-op");
     }

@@ -2,23 +2,30 @@
 //
 // Schema (one row per task; `roots` / `doneRoots` / `children` are NOT stored as lists):
 //
-//   tasks(id, parent, ord, text, done, collapsed, status, created_at, done_at, deleted_at)
+//   tasks(id, parent, ord, text, collapsed, status, created_at, done_at, deleted_at)
 //   meta(key, value)          -- next_id
 //
+// TWO TIMESTAMPS, NO BOOLEANS. `done_at` and `deleted_at` each carry both the state and
+// its date, so the pair can never disagree the way a flag beside a timestamp can:
+//
+//   done_at = 0    not done          deleted_at = 0    live
+//   done_at > 0    done, at that ms  deleted_at > 0    deleted, at that ms
+//   done_at = -1   done, date unknown (completed before the date was recorded)
+//
 // NOTHING IS EVER HARD-DELETED. There is no DELETE statement in this file: removing a
-// task stamps `deleted_at` with the epoch-ms of the deletion and the row stays forever.
-// Loads filter `deleted_at = 0`, so the Forest only ever holds live tasks — the trash is
-// deliberately outside the model, readable via deletedRows(). An id that comes back (an
-// undone delete) has `deleted_at` cleared to 0 by the upsert.
+// task stamps `deleted_at` and the row stays forever. Loads filter `deleted_at = 0`, so
+// the Forest only ever holds live tasks — the trash is deliberately outside the model,
+// readable via deletedRows(). An id that comes back (an undone delete) has `deleted_at`
+// cleared to 0 by the upsert.
 //
 // `ord` is a task's position among its siblings, or among the top-level tasks (parent = 0).
-// A done task keeps its parent and its `ord` — being done is a flag, not a move — so:
+// A done task keeps its parent and its `ord` — completion is a timestamp, not a move — so:
 //
 //   top-level tasks   parent = 0, ordered by ord     (done ones included)
 //   children of P     parent = P, ordered by ord     (ditto)
-//   canvas            tasks with no `done` on their ancestor chain
-//   DONE section      done = 1, and its top entries are those whose parent chain has no
-//                     other done task — so a done child of a live parent heads its own
+//   canvas            tasks with no done_at anywhere on their ancestor chain
+//   DONE section      done_at != 0, and its top entries are those whose parent chain has
+//                     no other done task — so a done child of a live parent heads its own
 //                     entry while staying in place under that parent
 //
 // Un-doing therefore needs no stored memory of where a task used to be: it never left.
@@ -44,7 +51,8 @@ namespace {
 
 namespace fs = std::filesystem;
 
-constexpr int kSchemaVersion = 2;   // 1 = original, 2 = + tasks.deleted_at (soft delete)
+// 1 = original, 2 = + deleted_at, 3 = `done` boolean folded into done_at
+constexpr int kSchemaVersion = 3;
 
 const char* const kSchema =
     "CREATE TABLE IF NOT EXISTS tasks("
@@ -52,11 +60,10 @@ const char* const kSchema =
     "  parent     INTEGER NOT NULL DEFAULT 0,"
     "  ord        INTEGER NOT NULL DEFAULT 0,"
     "  text       TEXT    NOT NULL DEFAULT '',"
-    "  done       INTEGER NOT NULL DEFAULT 0,"
     "  collapsed  INTEGER NOT NULL DEFAULT 0,"
     "  status     INTEGER NOT NULL DEFAULT 0,"
     "  created_at INTEGER NOT NULL DEFAULT 0,"
-    "  done_at    INTEGER NOT NULL DEFAULT 0,"
+    "  done_at    INTEGER NOT NULL DEFAULT 0,"    // 0 = not done; -1 = done, date unknown
     "  deleted_at INTEGER NOT NULL DEFAULT 0);"   // 0 = live; epoch ms = when it was deleted
     "CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent, ord);"
     "CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value NOT NULL);";
@@ -89,20 +96,29 @@ int userVersion(const Db& db) {
     return sqlite3_column_int(q.h, 0);
 }
 
-// Bring an older file up to kSchemaVersion. Additive only — a column gained here must
-// never require rewriting or dropping existing rows.
+// Bring an older file up to kSchemaVersion, one step at a time. No row is ever dropped,
+// and no state is lost: a step that removes a column must first move its information
+// somewhere else.
 bool upgradeSchema(const Db& db) {
     const int from = userVersion(db);
     if (from < 0) return false;
     if (from == kSchemaVersion) return true;
-    // Version 0 is a DB this process just created (CREATE TABLE already made it current).
-    if (from == 1) {
-        // v1 tables have no deleted_at. ADD COLUMN with a NOT NULL default is instant and
-        // leaves every existing row exactly as it is, correctly marked live (0).
-        if (!db.exec("ALTER TABLE tasks ADD COLUMN deleted_at INTEGER NOT NULL DEFAULT 0"))
+    if (from > kSchemaVersion) return false;   // written by a newer build: refuse, don't corrupt
+    // 0 means this process just created the file, so kSchema already made it current.
+    if (from >= 1) {
+        if (from < 2 &&
+            !db.exec("ALTER TABLE tasks ADD COLUMN deleted_at INTEGER NOT NULL DEFAULT 0"))
             return false;
-    } else if (from > kSchemaVersion) {
-        return false;   // written by a newer build: refuse rather than corrupt it
+        if (from < 3) {
+            // Folding `done` into done_at. Tasks completed before the date was recorded are
+            // done with done_at = 0, so they MUST be stamped kDoneAtUnknown first — dropping
+            // the column without this would silently un-complete every one of them.
+            if (!db.exec("UPDATE tasks SET done_at=-1 WHERE done!=0 AND done_at=0")) return false;
+            // Symmetrically, a done_at on a not-done row was always meaningless; clear it so
+            // done_at != 0 is exactly "done".
+            if (!db.exec("UPDATE tasks SET done_at=0 WHERE done=0 AND done_at!=0")) return false;
+            if (!db.exec("ALTER TABLE tasks DROP COLUMN done")) return false;
+        }
     }
     return db.exec(("PRAGMA user_version=" + std::to_string(kSchemaVersion)).c_str());
 }
@@ -138,7 +154,7 @@ int ordOf(const std::unordered_map<TaskId, int>& ord, TaskId id) {
 // Do these two tasks produce identical columns? `children` is deliberately excluded —
 // it is stored as the children's own parent+ord, not on this row.
 bool sameRow(const Task& a, const Task& b) {
-    return a.parent == b.parent && a.text == b.text && a.done == b.done &&
+    return a.parent == b.parent && a.text == b.text &&
            a.collapsed == b.collapsed && a.status == b.status &&
            a.createdAt == b.createdAt && a.doneAt == b.doneAt;
 }
@@ -162,7 +178,7 @@ bool loadDb(Forest& f, const std::string& path) {
     {
         Stmt q;
         if (!q.prepare(db.h,
-                       "SELECT id,parent,text,done,collapsed,status,created_at,done_at"
+                       "SELECT id,parent,text,collapsed,status,created_at,done_at"
                        " FROM tasks WHERE deleted_at=0 ORDER BY parent, ord, id"))
             return false;
         for (;;) {
@@ -176,11 +192,10 @@ bool loadDb(Forest& f, const std::string& path) {
             t.parent = static_cast<TaskId>(sqlite3_column_int64(q.h, 1));
             if (const unsigned char* s = sqlite3_column_text(q.h, 2))
                 t.text = reinterpret_cast<const char*>(s);
-            t.done = sqlite3_column_int(q.h, 3) != 0;
-            t.collapsed = sqlite3_column_int(q.h, 4) != 0;
-            t.status = sqlite3_column_int(q.h, 5);
-            t.createdAt = sqlite3_column_int64(q.h, 6);
-            t.doneAt = sqlite3_column_int64(q.h, 7);
+            t.collapsed = sqlite3_column_int(q.h, 3) != 0;
+            t.status = sqlite3_column_int(q.h, 4);
+            t.createdAt = sqlite3_column_int64(q.h, 5);
+            t.doneAt = sqlite3_column_int64(q.h, 6);
 
             rowOrder.push_back(t.id);
             f.nextId = std::max<TaskId>(f.nextId, t.id + 1);
@@ -250,10 +265,10 @@ bool saveDb(const Forest& f, const std::string& path, const Forest* baseline) {
         // deleted_at=0 on both paths: a task present in the forest is live by definition,
         // so writing one un-deletes its row (this is what makes undo-of-a-delete work).
         ok = up.prepare(db.h,
-                        "INSERT INTO tasks(id,parent,ord,text,done,collapsed,status,"
-                        "created_at,done_at,deleted_at) VALUES(?,?,?,?,?,?,?,?,?,0)"
+                        "INSERT INTO tasks(id,parent,ord,text,collapsed,status,"
+                        "created_at,done_at,deleted_at) VALUES(?,?,?,?,?,?,?,?,0)"
                         " ON CONFLICT(id) DO UPDATE SET parent=excluded.parent,"
-                        " ord=excluded.ord, text=excluded.text, done=excluded.done,"
+                        " ord=excluded.ord, text=excluded.text,"
                         " collapsed=excluded.collapsed, status=excluded.status,"
                         " created_at=excluded.created_at, done_at=excluded.done_at,"
                         " deleted_at=0");
@@ -267,11 +282,10 @@ bool saveDb(const Forest& f, const std::string& path, const Forest* baseline) {
             sqlite3_bind_int(up.h, 3, ordOf(ord, id));
             // SQLITE_STATIC: `*t` lives in the forest, which outlives this step().
             sqlite3_bind_text(up.h, 4, t->text.c_str(), -1, SQLITE_STATIC);
-            sqlite3_bind_int(up.h, 5, t->done ? 1 : 0);
-            sqlite3_bind_int(up.h, 6, t->collapsed ? 1 : 0);
-            sqlite3_bind_int(up.h, 7, t->status);
-            sqlite3_bind_int64(up.h, 8, t->createdAt);
-            sqlite3_bind_int64(up.h, 9, t->doneAt);
+            sqlite3_bind_int(up.h, 5, t->collapsed ? 1 : 0);
+            sqlite3_bind_int(up.h, 6, t->status);
+            sqlite3_bind_int64(up.h, 7, t->createdAt);
+            sqlite3_bind_int64(up.h, 8, t->doneAt);
             ok = sqlite3_step(up.h) == SQLITE_DONE;
         }
     }

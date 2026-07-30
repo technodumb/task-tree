@@ -31,7 +31,7 @@ def descendants(children, roots):
 def query(uri):
     con = sqlite3.connect(uri, uri=True, timeout=2)
     try:
-        return con.execute("SELECT id,parent,text,done FROM tasks").fetchall()
+        return con.execute("SELECT id,parent,text,done_at FROM tasks WHERE deleted_at=0").fetchall()
     finally:
         con.close()
 
@@ -56,15 +56,17 @@ def from_db(path):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    # roots/doneRoots/children are derived in the DB: parent 0 + done = a DONE root.
-    tasks, children, done_roots = [], {}, []
-    for tid, parent, text, done in rows:
+    # The DB stores no roots/children lists, and completion is a timestamp rather than a
+    # flag: done_at != 0 means done (-1 = done, date unknown). A done task keeps its parent,
+    # so the DONE section is every done task plus its descendants.
+    tasks, children, done = [], {}, []
+    for tid, parent, text, done_at in rows:
         tasks.append({"id": tid, "text": text or ""})
         if parent:
             children.setdefault(parent, []).append(tid)
-        elif done:
-            done_roots.append(tid)
-    return tasks, descendants(children, done_roots)
+        if done_at:
+            done.append(tid)
+    return tasks, descendants(children, done)
 
 
 def from_json(path):

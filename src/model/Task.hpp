@@ -14,20 +14,28 @@ using TaskId = std::uint64_t;
 // A parent id of 0 means "no parent" — the task is a top-level root.
 constexpr TaskId kNoParent = 0;
 
+// `doneAt` for a task that is done but whose completion time isn't known — tasks completed
+// before the date was recorded. It has to be distinguishable from "not done" (0) without
+// inventing a completion date, so done-ness is `doneAt != 0`, not `doneAt > 0`.
+constexpr std::int64_t kDoneAtUnknown = -1;
+
 struct Task {
     TaskId id = 0;
     TaskId parent = kNoParent;
     std::string text;               // UTF-8
     std::vector<TaskId> children;   // ordered; sibling order IS the layout order
-    // Done tasks keep their parent and their sibling slot — marking done does NOT move the
-    // node. The DONE section is derived from this flag (see Forest::doneSectionRoots), and
-    // the canvas layout simply skips done subtrees. So un-doing puts the task back exactly
-    // where it was, because it never left.
-    bool done = false;
     bool collapsed = false;         // when true, layout hides this node's subtree (chevron toggles)
     int  status = 0;                // 0 = default, 1 = in progress (yellow), 2 = priority (orange)
     std::int64_t createdAt = 0;     // epoch ms when created (0 = unknown, e.g. pre-existing)
-    std::int64_t doneAt = 0;        // epoch ms when marked done (0 = not done / null)
+    // Completion, stored the same way deletion is: a timestamp IS the flag, so the two can
+    // never disagree. 0 = not done, > 0 = done then, kDoneAtUnknown = done at an unknown
+    // time. Done tasks keep their parent and their sibling slot — completing one does NOT
+    // move it. The DONE section is derived from this (see Forest::doneSectionRoots) and the
+    // canvas layout skips done subtrees, so un-doing puts a task back exactly where it was,
+    // because it never left.
+    std::int64_t doneAt = 0;
+
+    bool isDone() const { return doneAt != 0; }
 };
 
 // A forest of task trees. `roots` holds the top-level tasks in display order — done ones
@@ -71,10 +79,12 @@ public:
     // Remove a task and its whole subtree. Returns number of tasks removed.
     std::size_t removeSubtree(TaskId id);
 
-    // Flag a task (with its subtree) done, taking it off the canvas and into the DONE
-    // section. The node does not move: parent and sibling slot are untouched. Returns
+    // Complete a task (with its subtree), taking it off the canvas and into the DONE
+    // section. The node does not move: parent and sibling slot are untouched. `doneAtMs` is
+    // the completion time — the model owns no clock, so the caller passes it, as with
+    // addTask's createdAt; 0 is stored as kDoneAtUnknown so the task is still done. Returns
     // false if it is already done or invalid.
-    bool markDone(TaskId id);
+    bool markDone(TaskId id, std::int64_t doneAtMs = kDoneAtUnknown);
 
     // Clear the done flag, which puts the task back exactly where it was — same parent,
     // same position among its siblings. Only when an ancestor is still done (so the task
