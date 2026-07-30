@@ -110,7 +110,59 @@ A dropdown to switch between several independent graphs, each its own forest.
 - **Tray icon / D-Bus activation** as a fallback if a chosen global hotkey can't be grabbed.
 - **macOS / Windows** ports behind `IPlatform` (Carbon/Cocoa hotkeys; Win32 `RegisterHotKey`).
 
+## Deferred — SQLite store (ttd 133)
+Replace the hand-rolled JSON store (`model/Store.cpp`, 112 lines, dependency-free) with
+SQLite behind the same `store::load`/`save` seam.
+
+**Verdict first: not worth doing for storage's sake.** 134 tasks ≈ 35 KB; save-on-every-
+change rewrites the whole file atomically (temp + `rename`) from 12 call sites in `App` and
+costs nothing measurable — two orders of magnitude more data before that hurts. The one
+structural argument: **JSON's unit of write is the whole forest; SQLite's is the row.**
+Everything below follows from that, and none of it is reachable without it.
+
+- **Concurrent external edits.** The ttd workflow currently has to stop the app, edit
+  `tasks.json`, and restart it, because the running app clobbers the edit on its next save.
+  With WAL (one writer, many readers) an agent or a `tt` CLI can write *while the app runs*;
+  the app reloads the changed rows instead of overwriting them. This is the actual reason to
+  switch.
+- **Persistent undo.** `History` holds in-memory whole-`Forest` snapshots, dropped on exit.
+  An append-only `ops` table makes undo survive restarts and doubles as an audit log
+  (supersedes "crash-safe history" below).
+- **Multiple graphs (ttd 106).** One file, N forests, loaded lazily — removes that entry's
+  "one JSON per graph plus an index file" awkwardness and its atomic-save open question.
+- **Queries.** `created_at`/`done_at` are already persisted but only reachable by walking the
+  forest in C++; throughput, aging and "untouched for 30 days" become `SELECT`s.
+
+**Costs to accept explicitly**
+- `tt_io` is one of the two dependency-free layers — `store_tests` links nothing, and the
+  `plan/qt6-fallback` / `plan/imgui-alt` branches reuse `model/` + `Store` verbatim. Even the
+  SQLite amalgamation (one `.c`) ends that property.
+- Loses greppable, diffable, hand-repairable state. `.dump` is not the same thing.
+- A schema means migrations. JSON version-stamps (`{"version": 1}`) and never needed one; a
+  table does (`PRAGMA user_version`).
+
+**Shape if built**
+- `tasks(id, parent, ord, text, done, collapsed, status, created_at, done_at)` +
+  `meta(key, value)` for `next_id` / schema version. `roots` and `doneRoots` become derived
+  (`parent IS NULL`, plus a done flag) rather than two stored vectors. Sibling order lives in
+  `ord` — which finally gives the sibling-reordering item under *interaction & motion* a home,
+  since `Forest::reparent` takes an index today that every caller ignores.
+- Keep whole-forest `load`/`save` first (load at start, save as one transaction) so `App` and
+  its 12 call sites don't change on day one; move to incremental row writes after that works.
+- WAL, `synchronous=NORMAL`, single writer.
+- **Keep JSON permanently** as export/import (see below): backup, git-diffable snapshot, and
+  the ttd fallback if the DB is ever wedged.
+- Migration: on first run, if `tasks.json` exists and the DB doesn't, import it and leave the
+  JSON in place as `tasks.json.bak`.
+
+**Cheaper alternative if external edits are the only goal.** Watch the data directory with
+inotify (save is a `rename`, so watch the dir, not the file) and reload on change — ~60 lines,
+no new dependency. It does *not* fix clobbering: the app's next whole-file save still wins. Fits
+"pick up my edits", not "edit while I work".
+
 ## Deferred — data & polish
-- **Export / import** (Markdown outline, OPML, JSON).
-- **Debounced / journaled saves** instead of save-on-every-change; crash-safe history.
+- **Export / import** (Markdown outline, OPML, JSON). Becomes load-bearing if the SQLite
+  store above lands — JSON export is then the only human-readable form of the data.
+- **Debounced / journaled saves** instead of save-on-every-change; crash-safe history
+  (largely subsumed by the SQLite `ops` table above).
 - **Config hot-reload** (watch the config file, re-apply without restart).
