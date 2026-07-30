@@ -134,9 +134,10 @@ Everything below follows from that, and none of it is reachable without it.
   forest in C++; throughput, aging and "untouched for 30 days" become `SELECT`s.
 
 **Costs to accept explicitly**
-- `tt_io` is one of the two dependency-free layers — `store_tests` links nothing, and the
-  `plan/qt6-fallback` / `plan/imgui-alt` branches reuse `model/` + `Store` verbatim. Even the
-  SQLite amalgamation (one `.c`) ends that property.
+- `tt_core` (model + layout + palette) is the dependency-free layer and stays that way.
+  `tt_io` already links nlohmann/json and toml++, but those are header-only: SQLite is the
+  first *compiled* third-party library in the persistence path, and the
+  `plan/qt6-fallback` / `plan/imgui-alt` branches reuse `model/` + `Store` verbatim.
 - Loses greppable, diffable, hand-repairable state. `.dump` is not the same thing.
 - A schema means migrations. JSON version-stamps (`{"version": 1}`) and never needed one; a
   table does (`PRAGMA user_version`).

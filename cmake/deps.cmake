@@ -43,6 +43,31 @@ FetchContent_MakeAvailable(glfw glad nlohmann_json tomlplusplus httplib)
 # GL 3.3 core loader library target: glad_gl_core_33
 glad_add_library(glad_gl_core_33 STATIC API gl:core=3.3)
 
+# ---- SQLite 3.53.4 : the task store ----------------------------------------
+# The amalgamation (one sqlite3.c) rather than system libsqlite3, so the system
+# requirement stays "X11 + GL dev headers" like every other dep here. Pinned by
+# SHA256 — sqlite.org URLs are mutable per release.
+FetchContent_Declare(sqlite_amalgamation
+    URL      https://sqlite.org/2026/sqlite-amalgamation-3530400.zip
+    URL_HASH SHA256=1e71ddf93849c6a6ecf58b827c0692073d2dd7ee40196158068f7b29f422e87d)
+FetchContent_MakeAvailable(sqlite_amalgamation)   # sources only: no upstream CMakeLists
+
+add_library(sqlite3 STATIC ${sqlite_amalgamation_SOURCE_DIR}/sqlite3.c)
+target_include_directories(sqlite3 PUBLIC ${sqlite_amalgamation_SOURCE_DIR})
+# Trim what we don't use; DQS=0 makes "..." a string only (never an identifier), so a
+# typo'd column name is an error instead of a silently-quoted string.
+target_compile_definitions(sqlite3 PRIVATE
+    SQLITE_DQS=0
+    SQLITE_THREADSAFE=1
+    SQLITE_OMIT_LOAD_EXTENSION
+    SQLITE_OMIT_DEPRECATED
+    SQLITE_DEFAULT_MEMSTATUS=0
+    SQLITE_DEFAULT_WAL_SYNCHRONOUS=1)
+target_link_libraries(sqlite3 PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+if(NOT MSVC)
+    target_compile_options(sqlite3 PRIVATE -w)   # not our warnings to fix
+endif()
+
 # ---- NanoVG : anti-aliased vector rendering (no CMake / releases upstream) --
 # Pin an exact commit for reproducibility (TODO: replace master with a SHA).
 FetchContent_Declare(nanovg

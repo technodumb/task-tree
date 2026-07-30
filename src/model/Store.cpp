@@ -1,5 +1,7 @@
 #include "model/Store.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 
@@ -12,7 +14,22 @@ namespace tt::store {
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
+bool isDbPath(const std::string& path) {
+    std::string ext = fs::path(path).extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return ext == ".db" || ext == ".sqlite" || ext == ".sqlite3";
+}
+
 bool load(Forest& f, const std::string& path) {
+    return isDbPath(path) ? loadDb(f, path) : loadJson(f, path);
+}
+
+bool save(const Forest& f, const std::string& path) {
+    return isDbPath(path) ? saveDb(f, path) : saveJson(f, path);
+}
+
+bool loadJson(Forest& f, const std::string& path) {
     std::ifstream in(path);
     if (!in) return false;
 
@@ -65,7 +82,7 @@ bool load(Forest& f, const std::string& path) {
     return true;
 }
 
-bool save(const Forest& f, const std::string& path) {
+bool saveJson(const Forest& f, const std::string& path) {
     fs::path p(path);
     if (auto dir = p.parent_path(); !dir.empty()) paths::ensureDir(dir);
 

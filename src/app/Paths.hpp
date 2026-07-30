@@ -27,6 +27,7 @@ inline std::filesystem::path configDir() {
 }
 
 inline std::filesystem::path tasksFile()  { return dataDir()   / "tasks.json"; }
+inline std::filesystem::path dbFile()     { return dataDir()   / "tasks.db"; }
 inline std::filesystem::path configFile() { return configDir() / "config.toml"; }
 
 // Create a directory (and parents) if missing. Best-effort; returns success.

@@ -46,13 +46,18 @@ add_library(tt_core STATIC
 target_include_directories(tt_core PUBLIC src)
 
 # ---- I/O library (persistence + config) ------------------------------------
+# Two store backends live here: SQLite (primary) and JSON (export/import + the
+# pre-SQLite data files). sqlite3 is PRIVATE — sqlite3.h stays out of Store.hpp.
 add_library(tt_io STATIC
     src/model/Store.cpp
+    src/model/SqliteStore.cpp
     src/app/Config.cpp)
 target_include_directories(tt_io PUBLIC src)
-target_link_libraries(tt_io PUBLIC tt_core
-    nlohmann_json::nlohmann_json
-    tomlplusplus::tomlplusplus)
+target_link_libraries(tt_io
+    PUBLIC tt_core
+        nlohmann_json::nlohmann_json
+        tomlplusplus::tomlplusplus
+    PRIVATE sqlite3)
 
 # ---- Application executable -------------------------------------------------
 add_executable(tasktree

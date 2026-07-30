@@ -91,8 +91,24 @@ int main() {
 
     Config cfg = loadOrCreateDefaultConfig();
 
+    // Store: SQLite (docs/FUTURE.md "SQLite store"). A pre-SQLite tasks.json is migrated
+    // once, and only if the migration can prove it round-tripped exactly — otherwise we
+    // stay on JSON. Either way tasks.json is never written, renamed or removed here, so
+    // the old file remains a complete backup of the state before the switch.
     Forest forest;
-    const std::string tasksPath = paths::tasksFile().string();
+    const std::string jsonPath = paths::tasksFile().string();
+    std::string tasksPath = paths::dbFile().string();
+    if (!std::filesystem::exists(tasksPath) && std::filesystem::exists(jsonPath)) {
+        if (store::migrateJsonToDb(jsonPath, tasksPath)) {
+            std::fprintf(stderr, "Store: migrated to %s (verified); %s is now an untouched "
+                                 "backup and is no longer read or written\n",
+                         tasksPath.c_str(), jsonPath.c_str());
+        } else {
+            tasksPath = jsonPath;
+            std::fprintf(stderr, "Store: SQLite migration did not verify — staying on %s. "
+                                 "Nothing was changed.\n", jsonPath.c_str());
+        }
+    }
     store::load(forest, tasksPath); // ok if absent -> empty forest
 
     // Classifier selection (all cloud/local LLMs go through the one OpenAI-compatible

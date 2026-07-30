@@ -8,8 +8,11 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <string>
 
 using namespace tt;
 namespace fs = std::filesystem;
@@ -23,6 +26,19 @@ static int g_checks = 0, g_fail = 0;
 
 static fs::path tmpFile(const char* name) {
     return fs::temp_directory_path() / (std::string("tasktree_test_") + name);
+}
+
+// A SQLite DB is up to three files in WAL mode; leave none of them behind.
+static void removeDb(const std::string& path) {
+    std::error_code ec;
+    fs::remove(path, ec);
+    fs::remove(path + "-wal", ec);
+    fs::remove(path + "-shm", ec);
+}
+
+static std::string readAll(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
 int main() {
@@ -94,6 +110,141 @@ int main() {
               "done task is not a canvas root");
         CHECK(g.get(d)->children.size() == 1, "done subtree intact");
         fs::remove(path);
+    }
+
+    // ---- SQLite round-trip -----------------------------------------------------
+    // Every field, every ordering. `equivalent()` is exact, so this fails on any drift.
+    {
+        Forest f;
+        TaskId a = f.addTask("alpha — éà", kNoParent, 1700000000000);  // UTF-8 + timestamp
+        TaskId b = f.addTask("beta", a);
+        TaskId c = f.addTask("gamma", a);
+        f.addTask("delta", b);
+        f.get(a)->collapsed = true;
+        f.get(c)->status = 2;
+        TaskId second = f.addTask("second root");
+        TaskId third = f.addTask("third root");
+        // Two DONE roots as well, so the shared parent=0 rows have to stay in their own
+        // ord sequences (roots vs doneRoots both start at 0).
+        TaskId d1 = f.addTask("finished one");
+        f.addTask("its child", d1);
+        TaskId d2 = f.addTask("finished two");
+        f.markDone(d1);
+        f.markDone(d2);
+        f.get(d1)->doneAt = 1700000009999;
+
+        const std::string db = tmpFile("roundtrip.db").string();
+        removeDb(db);
+        CHECK(store::saveDb(f, db), "sqlite save succeeds");
+
+        Forest g;
+        CHECK(store::loadDb(g, db), "sqlite load succeeds");
+        CHECK(equivalent(f, g), "sqlite round-trip is field-for-field identical");
+        CHECK(g.roots == f.roots, "canvas root order preserved");
+        CHECK(g.doneRoots == f.doneRoots, "DONE root order preserved");
+        CHECK(g.get(a) && g.get(a)->children == f.get(a)->children, "sibling order preserved");
+        CHECK(g.get(a) && g.get(a)->text == "alpha — éà", "UTF-8 text preserved");
+        CHECK(g.get(a) && g.get(a)->collapsed, "collapsed preserved");
+        CHECK(g.get(c) && g.get(c)->status == 2, "status preserved");
+        CHECK(g.get(a) && g.get(a)->createdAt == 1700000000000, "createdAt preserved");
+        CHECK(g.get(d1) && g.get(d1)->doneAt == 1700000009999, "doneAt preserved");
+        CHECK(g.nextId == f.nextId, "nextId preserved");
+        CHECK(g.get(d1) && g.get(d1)->children.size() == 1, "DONE subtree intact");
+        CHECK(g.get(second) && g.get(third), "all roots present");
+
+        // Saving again over the same DB must not duplicate or drop anything.
+        CHECK(store::saveDb(f, db), "re-save over an existing DB");
+        Forest h;
+        CHECK(store::loadDb(h, db) && equivalent(f, h), "re-save is idempotent");
+
+        // A deletion in the forest must delete the row, not leave an orphan behind.
+        Forest less = f;
+        less.removeSubtree(a);
+        CHECK(store::saveDb(less, db), "save after removing a subtree");
+        Forest k;
+        CHECK(store::loadDb(k, db), "load after removing a subtree");
+        CHECK(!k.exists(a) && !k.exists(b) && !k.exists(c), "removed rows are gone");
+        CHECK(equivalent(less, k), "post-delete state round-trips");
+        removeDb(db);
+    }
+
+    // ---- Missing DB / backend dispatch ----------------------------------------
+    {
+        Forest g;
+        CHECK(!store::loadDb(g, tmpFile("nope.db").string()), "missing DB -> false");
+        CHECK(g.size() == 0, "forest stays empty");
+
+        CHECK(store::isDbPath("/tmp/tasks.db"), ".db is a DB path");
+        CHECK(store::isDbPath("/tmp/tasks.SQLite"), ".sqlite is a DB path (any case)");
+        CHECK(!store::isDbPath("/tmp/tasks.json"), ".json is not a DB path");
+
+        // load()/save() must pick the backend from the extension.
+        Forest f;
+        f.addTask("dispatch me");
+        const std::string db = tmpFile("dispatch.db").string();
+        removeDb(db);
+        CHECK(store::save(f, db), "save() dispatches to SQLite");
+        Forest viaFacade;
+        CHECK(store::load(viaFacade, db) && equivalent(f, viaFacade), "load() dispatches too");
+        removeDb(db);
+    }
+
+    // ---- JSON -> SQLite migration: verified and non-destructive ----------------
+    {
+        Forest f;
+        TaskId r = f.addTask("keep me");
+        f.addTask("child", r);
+        TaskId d = f.addTask("done root");
+        f.markDone(d);
+
+        const std::string js = tmpFile("migrate.json").string();
+        const std::string db = tmpFile("migrate.db").string();
+        removeDb(db);
+        CHECK(store::saveJson(f, js), "seed a JSON store");
+        const std::string before = readAll(js);
+
+        CHECK(store::migrateJsonToDb(js, db), "migration succeeds");
+        CHECK(fs::exists(db), "DB created");
+        CHECK(fs::exists(js), "JSON file still exists after migration");
+        CHECK(readAll(js) == before, "JSON file is byte-for-byte untouched");
+
+        Forest fromJson, fromDb;
+        CHECK(store::loadJson(fromJson, js), "reload the JSON");
+        CHECK(store::loadDb(fromDb, db), "load the migrated DB");
+        CHECK(equivalent(fromJson, fromDb), "migrated DB matches the JSON exactly");
+
+        // Re-running must refuse rather than rewrite a store that already exists.
+        CHECK(!store::migrateJsonToDb(js, db), "migration refuses an existing DB");
+        Forest again;
+        CHECK(store::loadDb(again, db) && equivalent(fromJson, again), "existing DB intact");
+
+        // A missing source leaves no DB behind at all.
+        const std::string db2 = tmpFile("migrate_missing.db").string();
+        removeDb(db2);
+        CHECK(!store::migrateJsonToDb(tmpFile("no_such.json").string(), db2),
+              "migration fails on a missing JSON");
+        CHECK(!fs::exists(db2), "failed migration leaves no DB behind");
+
+        removeDb(db);
+        fs::remove(js);
+    }
+
+    // ---- Real data check (opt-in): TASKTREE_TEST_JSON=<a copy of tasks.json> ---
+    // Proves the migration on the actual file rather than on synthetic fixtures.
+    if (const char* real = std::getenv("TASKTREE_TEST_JSON")) {
+        Forest live;
+        CHECK(store::loadJson(live, real), "real tasks.json loads");
+        const std::string db = tmpFile("real_data.db").string();
+        removeDb(db);
+        CHECK(store::migrateJsonToDb(real, db), "real tasks.json migrates + verifies");
+        Forest back;
+        CHECK(store::loadDb(back, db), "migrated real DB loads");
+        CHECK(equivalent(live, back), "every real task survives byte-for-byte");
+        std::printf("  real-data check: %zu tasks, %zu roots, %zu done roots\n",
+                    live.size(), live.roots.size(), live.doneRoots.size());
+        removeDb(db);
+    } else {
+        std::printf("  real-data check skipped (set TASKTREE_TEST_JSON to a tasks.json copy)\n");
     }
 
     // ---- Config round-trip -----------------------------------------------------

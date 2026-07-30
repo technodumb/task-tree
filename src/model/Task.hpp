@@ -76,4 +76,9 @@ private:
     void collectSubtree(TaskId id, std::vector<TaskId>& out) const;
 };
 
+// Deep equality: same ids, same nextId, same roots/doneRoots order, and every Task
+// field (including children order) identical. Deliberately exact — a store migration
+// uses it to prove a round-trip lost nothing, so "close enough" would defeat the point.
+bool equivalent(const Forest& a, const Forest& b);
+
 } // namespace tt

@@ -121,6 +121,22 @@ bool Forest::restoreFromDone(TaskId id) {
     return true;
 }
 
+bool equivalent(const Forest& a, const Forest& b) {
+    if (a.nextId != b.nextId) return false;
+    if (a.roots != b.roots || a.doneRoots != b.doneRoots) return false;
+    if (a.nodes.size() != b.nodes.size()) return false;
+    for (const auto& [id, ta] : a.nodes) {
+        const Task* tb = b.get(id);
+        if (!tb) return false;
+        if (ta.id != tb->id || ta.parent != tb->parent || ta.text != tb->text ||
+            ta.done != tb->done || ta.collapsed != tb->collapsed || ta.status != tb->status ||
+            ta.createdAt != tb->createdAt || ta.doneAt != tb->doneAt ||
+            ta.children != tb->children)
+            return false;
+    }
+    return true;
+}
+
 void Forest::reindexRootsAfterLoad() {
     roots.clear();
     doneRoots.clear();
