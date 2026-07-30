@@ -230,6 +230,42 @@ int main() {
         CHECK(f.get(p)->children.size() == 2, "the done parent lost that child");
     }
 
+    { // repairAfterLoad: `parent` and `children` are two encodings of one edge, and a file
+      // can disagree with itself. Nothing may end up existing-but-unreachable.
+        Forest f;
+        f.nodes[1] = Task{1, kNoParent, "root", {}, false, 0, 0, 0};
+        f.nodes[2] = Task{2, 1, "child, unlisted by its parent", {}, false, 0, 0, 0};
+        f.nodes[3] = Task{3, 99, "dangling parent", {}, false, 0, 0, 0};
+        f.nodes[4] = Task{4, kNoParent, "missing from roots", {}, false, 0, 0, 0};
+        f.nodes[1].children = {2, 2, 7};   // a duplicate and a child that does not exist
+        f.roots = {1, 2};                  // 2 is not top level, so it does not belong here
+        f.nextId = 8;
+
+        f.repairAfterLoad();
+
+        CHECK(f.get(1)->children == std::vector<TaskId>{2}, "children deduped, phantom dropped");
+        CHECK(f.get(3)->parent == kNoParent, "a dangling parent becomes top level");
+        CHECK(std::find(f.roots.begin(), f.roots.end(), 2) == f.roots.end(),
+              "a non-top-level task is removed from roots");
+        for (TaskId id : {1u, 3u, 4u})
+            CHECK(std::find(f.roots.begin(), f.roots.end(), static_cast<TaskId>(id)) != f.roots.end(),
+                  "every parent-less task is in roots");
+        // Every task must now be reachable from roots by walking children.
+        std::vector<TaskId> seen, stack(f.roots.begin(), f.roots.end());
+        while (!stack.empty()) {
+            const TaskId id = stack.back();
+            stack.pop_back();
+            seen.push_back(id);
+            if (const Task* t = f.get(id))
+                for (TaskId c : t->children) stack.push_back(c);
+        }
+        CHECK(seen.size() == f.size(), "every task is reachable after the repair");
+
+        Forest again = f;
+        again.repairAfterLoad();
+        CHECK(equivalent(f, again), "repair is idempotent");
+    }
+
     { // the canvas layout skips done subtrees wherever they sit in the tree
         Forest f;
         TaskId root = f.addTask("root");

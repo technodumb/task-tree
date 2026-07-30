@@ -55,6 +55,13 @@ bool saveJson(const Forest& f, const std::string& path);
 bool loadDb(Forest& f, const std::string& path);
 bool saveDb(const Forest& f, const std::string& path, const Forest* baseline = nullptr);
 
+// How many tasks a JSON file *declares*, counted from the file itself rather than from a
+// loaded Forest — a loader's own output cannot be used to check that loader. `objects` is
+// task entries with a usable (positive integer) id; `distinct` is how many unique ids those
+// are. They differ only when a file has duplicate ids, which cannot be represented at all.
+// Returns false if the file is missing or unparseable.
+bool jsonTaskCount(const std::string& path, std::size_t& objects, std::size_t& distinct);
+
 // One-time JSON -> SQLite migration. Non-destructive and self-verifying:
 //   - refuses (false) if `dbPath` already exists — an existing store is never touched
 //   - writes the DB, reads it straight back, and requires tt::equivalent() with the

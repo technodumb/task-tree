@@ -96,6 +96,16 @@ public:
     // parent is missing/invalid is promoted to a root (defensive against corruption).
     void reindexRootsAfterLoad();
 
+    // Make a freshly-loaded forest internally consistent WITHOUT discarding the order the
+    // loader recovered: a dangling parent link becomes a root, `children` lists are filtered
+    // to tasks that really point back (and deduped), a task its parent never listed is
+    // appended to that parent, and a parent-less task missing from `roots` is appended there.
+    // Needed because `parent` and `children` are two encodings of one edge and a file can
+    // disagree with itself — an older or hand-edited file may carry `parent` links with no
+    // `children` arrays at all. Without this such a task exists but is unreachable, since
+    // both the layout and the DONE panel walk `children`.
+    void repairAfterLoad();
+
 private:
     void detachFromParent(TaskId child); // remove id from its current parent/roots list
     void collectSubtree(TaskId id, std::vector<TaskId>& out) const;

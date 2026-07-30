@@ -155,6 +155,53 @@ bool equivalent(const Forest& a, const Forest& b) {
     return true;
 }
 
+void Forest::repairAfterLoad() {
+    // A parent that no longer exists means top level.
+    for (auto& [id, t] : nodes)
+        if (t.parent != kNoParent && !exists(t.parent)) t.parent = kNoParent;
+
+    // Keep only children that exist and name this node as their parent, without duplicates.
+    // Deterministic ids for the passes below.
+    std::vector<TaskId> all;
+    all.reserve(nodes.size());
+    for (const auto& [id, t] : nodes) all.push_back(id);
+    std::sort(all.begin(), all.end());
+
+    for (TaskId id : all) {
+        Task& t = nodes[id];
+        std::vector<TaskId> kept;
+        kept.reserve(t.children.size());
+        for (TaskId c : t.children) {
+            const Task* ct = get(c);
+            if (!ct || ct->parent != id) continue;
+            if (std::find(kept.begin(), kept.end(), c) != kept.end()) continue;
+            kept.push_back(c);
+        }
+        t.children = std::move(kept);
+    }
+
+    // A task whose parent never listed it: append, so it is reachable by the walks.
+    for (TaskId id : all) {
+        const TaskId p = nodes[id].parent;
+        if (p == kNoParent) continue;
+        std::vector<TaskId>& kids = nodes[p].children;
+        if (std::find(kids.begin(), kids.end(), id) == kids.end()) kids.push_back(id);
+    }
+
+    // Same for the top level: a parent-less task the loader's `roots` order omitted.
+    for (TaskId id : all) {
+        if (nodes[id].parent != kNoParent) continue;
+        if (std::find(roots.begin(), roots.end(), id) == roots.end()) roots.push_back(id);
+    }
+    // And drop anything in `roots` that is not actually a parent-less task.
+    roots.erase(std::remove_if(roots.begin(), roots.end(),
+                               [this](TaskId id) {
+                                   const Task* t = get(id);
+                                   return !t || t->parent != kNoParent;
+                               }),
+                roots.end());
+}
+
 void Forest::reindexRootsAfterLoad() {
     roots.clear();
     // First pass: any node whose parent is missing becomes a top-level node.

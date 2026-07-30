@@ -460,6 +460,96 @@ int main() {
         fs::remove(js);
     }
 
+    // ---- Hostile / foreign JSON: never crash, never silently lose a task ---------
+    // These are shapes another person's file can have but mine does not. The loader used to
+    // throw an uncaught type_error on the first two, which kills the app at startup.
+    {
+        auto write = [](const std::string& p, const char* body) {
+            std::ofstream o(p);
+            o << body;
+        };
+
+        // Nulls where numbers/booleans belong.
+        const std::string nulls = tmpFile("hostile_nulls.json").string();
+        write(nulls, R"({"version":1,"nextId":5,"roots":[1],"tasks":[
+          {"id":1,"parent":null,"text":"nulls","children":[],"done":null,
+           "doneAt":null,"createdAt":null,"status":null,"collapsed":null}]})");
+        Forest a;
+        CHECK(store::loadJson(a, nulls), "a file full of nulls loads");
+        CHECK(a.size() == 1 && a.get(1) && a.get(1)->text == "nulls", "the task survives");
+        CHECK(!a.get(1)->isDone() && a.get(1)->status == 0, "null fields fall back to defaults");
+
+        // "done": null must NOT un-complete a task that carries a real doneAt.
+        const std::string nullDone = tmpFile("hostile_nulldone.json").string();
+        write(nullDone, R"({"version":1,"nextId":3,"roots":[1],"tasks":[
+          {"id":1,"parent":0,"text":"done, null flag","children":[],"done":null,
+           "doneAt":1700000000000}]})");
+        Forest b;
+        CHECK(store::loadJson(b, nullDone), "null done flag loads");
+        CHECK(b.get(1) && b.get(1)->isDone() && b.get(1)->doneAt == 1700000000000,
+              "a real doneAt wins over a meaningless done flag");
+
+        // Strings where numbers belong.
+        const std::string types = tmpFile("hostile_types.json").string();
+        write(types, R"({"version":1,"nextId":"nine","roots":[1],"tasks":[
+          {"id":1,"parent":"zero","text":"bad types","children":["x"],"done":"yes"}]})");
+        Forest c;
+        CHECK(store::loadJson(c, types), "wrong types load instead of throwing");
+        CHECK(c.size() == 1 && c.get(1)->parent == kNoParent, "unparseable parent -> top level");
+        CHECK(c.get(1)->children.empty(), "unparseable child ids are dropped");
+
+        // parent links with no children arrays: the child must still be reachable.
+        const std::string bare = tmpFile("hostile_bare.json").string();
+        write(bare, R"({"tasks":[{"id":1,"text":"p"},{"id":2,"parent":1,"text":"kid"}]})");
+        Forest d;
+        CHECK(store::loadJson(d, bare), "a file with no roots/children lists loads");
+        CHECK(d.size() == 2, "both tasks load");
+        CHECK(d.get(1) && d.get(1)->children == std::vector<TaskId>{2},
+              "the child is reachable from its parent");
+        const std::string bareDb = tmpFile("hostile_bare.db").string();
+        removeDb(bareDb);
+        CHECK(store::migrateJsonToDb(bare, bareDb), "and such a file still migrates");
+        removeDb(bareDb);
+
+        // Duplicate ids cannot be represented, so migration must REFUSE rather than freeze
+        // a lossy copy — the whole point of counting the raw file.
+        const std::string dup = tmpFile("hostile_dup.json").string();
+        write(dup, R"({"version":1,"nextId":3,"roots":[1],"tasks":[
+          {"id":1,"parent":0,"text":"first","children":[]},
+          {"id":1,"parent":0,"text":"same id","children":[]}]})");
+        std::size_t objects = 0, distinct = 0;
+        CHECK(store::jsonTaskCount(dup, objects, distinct), "counting the raw file works");
+        CHECK(objects == 2 && distinct == 1, "two entries, one id");
+        const std::string dupDb = tmpFile("hostile_dup.db").string();
+        removeDb(dupDb);
+        CHECK(!store::migrateJsonToDb(dup, dupDb), "duplicate ids refuse migration");
+        CHECK(!fs::exists(dupDb), "and leave no DB behind");
+
+        // The real file count must match what the loader produced, for a sane file.
+        CHECK(store::jsonTaskCount(bare, objects, distinct) && objects == 2 && distinct == 2,
+              "a good file counts straight");
+
+        for (const auto& p : {nulls, nullDone, types, bare, dup}) fs::remove(p);
+    }
+
+    // ---- Migration leaves a frozen copy of the source ---------------------------
+    {
+        Forest f;
+        f.addTask("backed up");
+        const std::string js = tmpFile("backup_src.json").string();
+        const std::string db = tmpFile("backup_src.db").string();
+        const std::string bak = js + ".pre-sqlite.bak";
+        removeDb(db);
+        fs::remove(bak);
+        CHECK(store::saveJson(f, js), "seed");
+        CHECK(store::migrateJsonToDb(js, db), "migrate");
+        CHECK(fs::exists(bak), "a .pre-sqlite.bak copy is left next to the source");
+        CHECK(readAll(bak) == readAll(js), "and it is byte-identical to the source");
+        removeDb(db);
+        fs::remove(bak);
+        fs::remove(js);
+    }
+
     // ---- Real data check (opt-in): TASKTREE_TEST_JSON=<a copy of tasks.json> ---
     // Proves the migration on the actual file rather than on synthetic fixtures.
     if (const char* real = std::getenv("TASKTREE_TEST_JSON")) {
