@@ -9,11 +9,27 @@
 // backend: they hold a path and the path decides. See docs/FUTURE.md "SQLite store"
 // for why SQLite (row-level writes) and what it is expected to unlock.
 
+#include <cstdint>
 #include <string>
+#include <vector>
 
 #include "model/Task.hpp"
 
 namespace tt::store {
+
+// A retired task, as kept by the SQLite backend. Deleting a task NEVER removes its row:
+// `deleted_at` is stamped and the row stays. Loads filter those rows out, so a Forest
+// only ever holds live tasks — the trash stays out of the model and is read through here
+// (the foundation for a future "restore deleted" view).
+struct DeletedRow {
+    TaskId id = 0;
+    TaskId parent = 0;
+    std::string text;
+    std::int64_t deletedAt = 0;   // epoch ms
+};
+
+// Retired rows, most recently deleted first. Empty for a JSON store or a missing file.
+std::vector<DeletedRow> deletedRows(const std::string& path);
 
 // True when `path` names a SQLite database by extension (.db / .sqlite / .sqlite3).
 bool isDbPath(const std::string& path);

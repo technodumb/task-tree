@@ -14,6 +14,8 @@
 #include <iterator>
 #include <string>
 
+#include <sqlite3.h>
+
 using namespace tt;
 namespace fs = std::filesystem;
 
@@ -34,6 +36,35 @@ static void removeDb(const std::string& path) {
     fs::remove(path, ec);
     fs::remove(path + "-wal", ec);
     fs::remove(path + "-shm", ec);
+}
+
+// Raw SQL, to see what the store API deliberately hides (soft-deleted rows) and to
+// build an old-schema fixture. -1 on any failure.
+static int rawCount(const std::string& db, const char* where) {
+    sqlite3* h = nullptr;
+    if (sqlite3_open_v2(db.c_str(), &h, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) return -1;
+    const std::string sql = std::string("SELECT count(*) FROM tasks WHERE ") + where;
+    sqlite3_stmt* s = nullptr;
+    int n = -1;
+    if (sqlite3_prepare_v2(h, sql.c_str(), -1, &s, nullptr) == SQLITE_OK &&
+        sqlite3_step(s) == SQLITE_ROW)
+        n = sqlite3_column_int(s, 0);
+    sqlite3_finalize(s);
+    sqlite3_close(h);
+    return n;
+}
+
+static int rawUserVersion(const std::string& db) {
+    sqlite3* h = nullptr;
+    if (sqlite3_open_v2(db.c_str(), &h, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) return -1;
+    sqlite3_stmt* s = nullptr;
+    int v = -1;
+    if (sqlite3_prepare_v2(h, "PRAGMA user_version", -1, &s, nullptr) == SQLITE_OK &&
+        sqlite3_step(s) == SQLITE_ROW)
+        v = sqlite3_column_int(s, 0);
+    sqlite3_finalize(s);
+    sqlite3_close(h);
+    return v;
 }
 
 static std::string readAll(const std::string& path) {
@@ -277,6 +308,102 @@ int main() {
         CHECK(!wiped.exists(external), "full rewrite drops it — which is why baselines exist");
         removeDb(db);
         removeDb(db2);
+    }
+
+    // ---- Soft delete: nothing is ever removed from the DB ----------------------
+    {
+        Forest f;
+        TaskId keep = f.addTask("survivor");
+        TaskId doomed = f.addTask("doomed parent");
+        TaskId child = f.addTask("doomed child", doomed);
+
+        const std::string db = tmpFile("soft_delete.db").string();
+        removeDb(db);
+        CHECK(store::saveDb(f, db), "seed");
+        CHECK(rawCount(db, "deleted_at=0") == 3, "three live rows");
+
+        Forest base = f;
+        f.removeSubtree(doomed);
+        CHECK(store::saveDb(f, db, &base), "save after removing a subtree");
+
+        // The rows are still there — that is the whole point.
+        CHECK(rawCount(db, "1=1") == 3, "NO row was removed from the table");
+        CHECK(rawCount(db, "deleted_at=0") == 1, "one row still live");
+        CHECK(rawCount(db, "deleted_at!=0") == 2, "the subtree is stamped, not gone");
+
+        // …but a load only ever sees live tasks.
+        Forest g;
+        CHECK(store::loadDb(g, db), "load after soft delete");
+        CHECK(g.size() == 1 && g.exists(keep), "load hides deleted rows");
+        CHECK(!g.exists(doomed) && !g.exists(child), "deleted tasks are not in the forest");
+        CHECK(equivalent(f, g), "live state round-trips");
+
+        // The trash is readable, newest first, with a real timestamp.
+        auto trash = store::deletedRows(db);
+        CHECK(trash.size() == 2, "deletedRows() returns both");
+        CHECK(trash[0].deletedAt > 0, "deleted_at is stamped");
+        bool sawChild = false, sawParent = false;
+        for (const auto& r : trash) {
+            if (r.id == child) { sawChild = true; CHECK(r.parent == doomed, "child keeps its parent"); }
+            if (r.id == doomed) { sawParent = true; CHECK(r.text == "doomed parent", "text kept"); }
+        }
+        CHECK(sawChild && sawParent, "both retired tasks are recoverable from the row data");
+
+        // Undo of a delete: the same ids come back, and their rows go live again.
+        const std::int64_t stamp = trash[0].deletedAt;
+        Forest afterDelete = f;
+        CHECK(store::saveDb(base, db, &afterDelete), "re-save the pre-delete forest (undo)");
+        CHECK(rawCount(db, "deleted_at=0") == 3, "all three rows live again");
+        CHECK(store::deletedRows(db).empty(), "trash is empty after the undo");
+        Forest h;
+        CHECK(store::loadDb(h, db) && equivalent(base, h), "undone state round-trips");
+        CHECK(stamp > 0, "the earlier stamp was real");
+
+        // Deleting again, twice, must not overwrite the first deletion's timestamp.
+        Forest base2 = base;
+        Forest gone = base;
+        gone.removeSubtree(doomed);
+        CHECK(store::saveDb(gone, db, &base2), "delete again");
+        const auto first = store::deletedRows(db);
+        CHECK(first.size() == 2, "stamped again");
+        CHECK(store::saveDb(gone, db, &base2), "repeat the same save");
+        const auto second = store::deletedRows(db);
+        CHECK(second.size() == 2 && second[0].deletedAt == first[0].deletedAt,
+              "a repeated delete keeps the ORIGINAL deleted_at");
+        removeDb(db);
+    }
+
+    // ---- Schema upgrade from a version-1 DB (no deleted_at column) --------------
+    {
+        const std::string db = tmpFile("schema_v1.db").string();
+        removeDb(db);
+        // Build the old schema by hand, with rows in it.
+        {
+            sqlite3* h = nullptr;
+            CHECK(sqlite3_open(db.c_str(), &h) == SQLITE_OK, "create a v1 DB");
+            const char* v1 =
+                "CREATE TABLE tasks(id INTEGER PRIMARY KEY, parent INTEGER NOT NULL DEFAULT 0,"
+                " ord INTEGER NOT NULL DEFAULT 0, text TEXT NOT NULL DEFAULT '',"
+                " done INTEGER NOT NULL DEFAULT 0, collapsed INTEGER NOT NULL DEFAULT 0,"
+                " status INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT 0,"
+                " done_at INTEGER NOT NULL DEFAULT 0);"
+                "CREATE TABLE meta(key TEXT PRIMARY KEY, value NOT NULL);"
+                "INSERT INTO tasks(id,parent,ord,text) VALUES(1,0,0,'old root'),(2,1,0,'old child');"
+                "INSERT INTO meta VALUES('next_id',3);"
+                "PRAGMA user_version=1;";
+            CHECK(sqlite3_exec(h, v1, nullptr, nullptr, nullptr) == SQLITE_OK, "seed v1 rows");
+            sqlite3_close(h);
+        }
+        // Opening it must add the column, keep both rows, and bump the version.
+        Forest g;
+        CHECK(store::loadDb(g, db), "a v1 DB still loads");
+        CHECK(g.size() == 2, "both old rows survived the upgrade");
+        CHECK(g.get(1) && g.get(1)->text == "old root", "old data intact");
+        CHECK(g.get(2) && g.get(2)->parent == 1, "old parent link intact");
+        CHECK(g.nextId == 3, "old next_id intact");
+        CHECK(rawUserVersion(db) == 2, "user_version bumped to 2");
+        CHECK(rawCount(db, "deleted_at=0") == 2, "existing rows are marked live");
+        removeDb(db);
     }
 
     // ---- JSON -> SQLite migration: verified and non-destructive ----------------

@@ -2,8 +2,14 @@
 //
 // Schema (one row per task; `roots` / `doneRoots` / `children` are NOT stored as lists):
 //
-//   tasks(id, parent, ord, text, done, collapsed, status, created_at, done_at)
+//   tasks(id, parent, ord, text, done, collapsed, status, created_at, done_at, deleted_at)
 //   meta(key, value)          -- next_id
+//
+// NOTHING IS EVER HARD-DELETED. There is no DELETE statement in this file: removing a
+// task stamps `deleted_at` with the epoch-ms of the deletion and the row stays forever.
+// Loads filter `deleted_at = 0`, so the Forest only ever holds live tasks — the trash is
+// deliberately outside the model, readable via deletedRows(). An id that comes back (an
+// undone delete) has `deleted_at` cleared to 0 by the upsert.
 //
 // The forest's three orderings all collapse into `ord` = position among siblings, or
 // among top-level nodes. Top-level nodes are those with parent = 0 (kNoParent), split
@@ -15,11 +21,11 @@
 // which is parity with the JSON store, not yet the incremental/concurrent story that
 // motivated SQLite — see docs/FUTURE.md.
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include <sqlite3.h>
@@ -32,7 +38,7 @@ namespace {
 
 namespace fs = std::filesystem;
 
-constexpr int kSchemaVersion = 1;
+constexpr int kSchemaVersion = 2;   // 1 = original, 2 = + tasks.deleted_at (soft delete)
 
 const char* const kSchema =
     "CREATE TABLE IF NOT EXISTS tasks("
@@ -44,9 +50,15 @@ const char* const kSchema =
     "  collapsed  INTEGER NOT NULL DEFAULT 0,"
     "  status     INTEGER NOT NULL DEFAULT 0,"
     "  created_at INTEGER NOT NULL DEFAULT 0,"
-    "  done_at    INTEGER NOT NULL DEFAULT 0);"
+    "  done_at    INTEGER NOT NULL DEFAULT 0,"
+    "  deleted_at INTEGER NOT NULL DEFAULT 0);"   // 0 = live; epoch ms = when it was deleted
     "CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent, ord);"
     "CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value NOT NULL);";
+
+std::int64_t nowMs() {
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+}
 
 // Owning handles: every early return below closes/finalizes without a goto ladder.
 struct Db {
@@ -65,6 +77,30 @@ struct Stmt {
     }
 };
 
+int userVersion(const Db& db) {
+    Stmt q;
+    if (!q.prepare(db.h, "PRAGMA user_version") || sqlite3_step(q.h) != SQLITE_ROW) return -1;
+    return sqlite3_column_int(q.h, 0);
+}
+
+// Bring an older file up to kSchemaVersion. Additive only — a column gained here must
+// never require rewriting or dropping existing rows.
+bool upgradeSchema(const Db& db) {
+    const int from = userVersion(db);
+    if (from < 0) return false;
+    if (from == kSchemaVersion) return true;
+    // Version 0 is a DB this process just created (CREATE TABLE already made it current).
+    if (from == 1) {
+        // v1 tables have no deleted_at. ADD COLUMN with a NOT NULL default is instant and
+        // leaves every existing row exactly as it is, correctly marked live (0).
+        if (!db.exec("ALTER TABLE tasks ADD COLUMN deleted_at INTEGER NOT NULL DEFAULT 0"))
+            return false;
+    } else if (from > kSchemaVersion) {
+        return false;   // written by a newer build: refuse rather than corrupt it
+    }
+    return db.exec(("PRAGMA user_version=" + std::to_string(kSchemaVersion)).c_str());
+}
+
 bool openDb(Db& db, const std::string& path, bool create) {
     const int flags = SQLITE_OPEN_READWRITE | (create ? SQLITE_OPEN_CREATE : 0);
     if (sqlite3_open_v2(path.c_str(), &db.h, flags, nullptr) != SQLITE_OK) return false;
@@ -74,7 +110,7 @@ bool openDb(Db& db, const std::string& path, bool create) {
     db.exec("PRAGMA journal_mode=WAL");
     db.exec("PRAGMA synchronous=NORMAL");
     if (!db.exec(kSchema)) return false;
-    return db.exec(("PRAGMA user_version=" + std::to_string(kSchemaVersion)).c_str());
+    return upgradeSchema(db);
 }
 
 // Position of every node within its sibling list (or within roots / doneRoots).
@@ -123,7 +159,7 @@ bool loadDb(Forest& f, const std::string& path) {
         Stmt q;
         if (!q.prepare(db.h,
                        "SELECT id,parent,text,done,collapsed,status,created_at,done_at"
-                       " FROM tasks ORDER BY parent, ord, id"))
+                       " FROM tasks WHERE deleted_at=0 ORDER BY parent, ord, id"))
             return false;
         for (;;) {
             const int rc = sqlite3_step(q.h);
@@ -178,7 +214,7 @@ bool saveDb(const Forest& f, const std::string& path, const Forest* baseline) {
     bool ok = true;
     const std::unordered_map<TaskId, int> ord = siblingOrder(f);
 
-    // Work out the minimum set of statements.
+    // Work out the minimum set of statements. `deletes` are SOFT: see the file header.
     std::vector<TaskId> upserts;
     std::vector<TaskId> deletes;
     if (baseline) {
@@ -192,10 +228,10 @@ bool saveDb(const Forest& f, const std::string& path, const Forest* baseline) {
         for (const auto& [id, t] : baseline->nodes)
             if (!f.exists(id)) deletes.push_back(id);   // WE deleted it; absence alone is not proof
     } else {
-        // Full rewrite: every node, and drop whatever else the table holds.
+        // Full rewrite: every node, and retire whatever else is still live.
         for (const auto& [id, t] : f.nodes) upserts.push_back(id);
         Stmt q;
-        if (q.prepare(db.h, "SELECT id FROM tasks")) {
+        if (q.prepare(db.h, "SELECT id FROM tasks WHERE deleted_at=0")) {
             while (sqlite3_step(q.h) == SQLITE_ROW) {
                 const TaskId id = static_cast<TaskId>(sqlite3_column_int64(q.h, 0));
                 if (!f.exists(id)) deletes.push_back(id);
@@ -207,13 +243,16 @@ bool saveDb(const Forest& f, const std::string& path, const Forest* baseline) {
 
     if (ok && !upserts.empty()) {
         Stmt up;
+        // deleted_at=0 on both paths: a task present in the forest is live by definition,
+        // so writing one un-deletes its row (this is what makes undo-of-a-delete work).
         ok = up.prepare(db.h,
                         "INSERT INTO tasks(id,parent,ord,text,done,collapsed,status,"
-                        "created_at,done_at) VALUES(?,?,?,?,?,?,?,?,?)"
+                        "created_at,done_at,deleted_at) VALUES(?,?,?,?,?,?,?,?,?,0)"
                         " ON CONFLICT(id) DO UPDATE SET parent=excluded.parent,"
                         " ord=excluded.ord, text=excluded.text, done=excluded.done,"
                         " collapsed=excluded.collapsed, status=excluded.status,"
-                        " created_at=excluded.created_at, done_at=excluded.done_at");
+                        " created_at=excluded.created_at, done_at=excluded.done_at,"
+                        " deleted_at=0");
         for (TaskId id : upserts) {
             if (!ok) break;
             const Task* t = f.get(id);
@@ -234,12 +273,16 @@ bool saveDb(const Forest& f, const std::string& path, const Forest* baseline) {
     }
 
     if (ok && !deletes.empty()) {
+        // Soft delete: stamp the row and keep it. `AND deleted_at=0` preserves the FIRST
+        // deletion's timestamp if this ever runs twice for the same id.
         Stmt del;
-        ok = del.prepare(db.h, "DELETE FROM tasks WHERE id=?");
+        ok = del.prepare(db.h, "UPDATE tasks SET deleted_at=? WHERE id=? AND deleted_at=0");
+        const std::int64_t when = nowMs();
         for (TaskId id : deletes) {
             if (!ok) break;
             sqlite3_reset(del.h);
-            sqlite3_bind_int64(del.h, 1, static_cast<sqlite3_int64>(id));
+            sqlite3_bind_int64(del.h, 1, when);
+            sqlite3_bind_int64(del.h, 2, static_cast<sqlite3_int64>(id));
             ok = sqlite3_step(del.h) == SQLITE_DONE;
         }
     }
@@ -262,6 +305,29 @@ bool saveDb(const Forest& f, const std::string& path, const Forest* baseline) {
         return false;
     }
     return db.exec("COMMIT");
+}
+
+std::vector<DeletedRow> deletedRows(const std::string& path) {
+    std::vector<DeletedRow> out;
+    std::error_code ec;
+    if (!fs::exists(path, ec)) return out;
+    Db db;
+    if (!openDb(db, path, false)) return out;
+
+    Stmt q;
+    if (!q.prepare(db.h, "SELECT id,parent,text,deleted_at FROM tasks WHERE deleted_at!=0"
+                         " ORDER BY deleted_at DESC, id"))
+        return out;
+    while (sqlite3_step(q.h) == SQLITE_ROW) {
+        DeletedRow r;
+        r.id = static_cast<TaskId>(sqlite3_column_int64(q.h, 0));
+        r.parent = static_cast<TaskId>(sqlite3_column_int64(q.h, 1));
+        if (const unsigned char* s = sqlite3_column_text(q.h, 2))
+            r.text = reinterpret_cast<const char*>(s);
+        r.deletedAt = sqlite3_column_int64(q.h, 3);
+        out.push_back(std::move(r));
+    }
+    return out;
 }
 
 bool migrateJsonToDb(const std::string& jsonPath, const std::string& dbPath) {

@@ -113,7 +113,9 @@ if(TASKTREE_BUILD_TESTS)
     target_link_libraries(core_tests PRIVATE tt_core)
     add_test(NAME core_tests COMMAND core_tests)
 
+    # sqlite3 directly, so the tests can build an old-schema fixture and inspect rows the
+    # public API hides on purpose (soft-deleted ones).
     add_executable(store_tests tests/store_tests.cpp)
-    target_link_libraries(store_tests PRIVATE tt_core tt_io)
+    target_link_libraries(store_tests PRIVATE tt_core tt_io sqlite3)
     add_test(NAME store_tests COMMAND store_tests)
 endif()
