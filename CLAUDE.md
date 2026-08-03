@@ -1,11 +1,12 @@
 # CLAUDE.md — repo guide
 
-## Default branch: `v2`
+## Default branch: `v3`
 
-Active development happens on **`v2`**, checked out in this folder (the main repo
-checkout, `Out/TaskTree`). At session start, check you're on `v2` and switch to it if
-not — don't start work on `main` or `v1`. `v1` is the maintenance line; `main` only
-tracks whatever the current line has published. Commit ttd work to `v2`; **never push**.
+Active development happens on **`v3`**, checked out in this folder (the main repo
+checkout, `Out/TaskTree`). At session start, check you're on `v3` and switch to it if
+not — don't start work on `main`, `v1` or `v2`. `v1`/`v2` are maintenance lines; `main`
+only tracks whatever the current line has published. Commit ttd work to `v3`;
+**never push**.
 
 ## ttd dev workflow — run this at the START of every session
 
@@ -32,15 +33,19 @@ be asked:
    implement → build (`cmake --build build -j`) → `ctest` → commit (one focused commit
    per task; **never push**).
 3. File each completed task into the DONE section under a done-root titled **`ttd ✓ done`**
-   (create it if missing). Edit safely: `~/.init-scripts/tasktree.sh stop` → re-read the
-   CURRENT store → apply the edit → `~/.init-scripts/tasktree.sh start`. **Still stop the
-   app first**, but for a narrower reason than before: the DB save is now incremental, so
-   it no longer wholesale-overwrites and a row you insert while it runs will survive. What
-   it does not yet do is *notice* — the app holds a stale in-memory copy, so your change is
-   invisible until restart, and if the app later edits that same task it writes its own
-   version over yours. Preserve every other task exactly (ids, order, parents, status, done
-   state); for the DB that means `ord` and `parent` too, and `meta.next_id` must not go
-   backwards. There is no `sqlite3` CLI on this machine — use `python3 -c "import sqlite3; …"`.
+   (create it if missing). **You no longer need to stop the app.** It holds one connection
+   and polls `PRAGMA data_version` (~1 s), so it notices another writer's commit and
+   reloads: re-read the CURRENT store, apply your edit in **one transaction**
+   (`BEGIN IMMEDIATE`, commit promptly — both sides run a 3–5 s busy timeout), and it
+   appears on the live canvas within a second. Confirm in `/tmp/tasktree.log`, which
+   prints `Store: another writer changed … — reloaded (N tasks)` per pickup. Two caveats:
+   a reload clears the app's undo stack, and don't edit a row the user is actively
+   editing/dragging that same second (the app defers its reload while a drag or in-bar
+   edit is underway, then wins any same-row conflict). Preserve every other task exactly
+   (ids, order, parents, status, done state); that means `ord` and `parent` too, and
+   `meta.next_id` must not go backwards. There is no `sqlite3` CLI on this machine — use
+   `python3 -c "import sqlite3; …"`. (App stopped, or running a pre-Session binary? The
+   old `tasktree.sh stop` → edit → `start` dance still works.)
 4. If a task is **ambiguous, risky, or destructive, don't implement it** — surface the
    doubt (tell the user, and/or flag it orange `status=2` / add a `❓ <question>` child
    in the tree) and move on. You're in a live session, so just ask the user directly
@@ -63,7 +68,7 @@ edits/commits as they come. There is no unattended loop and no standing allowlis
   succeed, run `~/.init-scripts/tasktree.sh restart` (aliased `tasktree restart`) so the
   live instance picks up the new binary and the user can see the change immediately.
   Do this once per finished set of changes — after the successful build — not after each
-  individual edit. Restart is safe: tasks persist in `tasks.json` across it.
+  individual edit. Restart is safe: tasks persist in the store across it.
 
 ## Layout of the code
 `src/model` (Task/Forest + JSON store), `src/layout` (pure tidy-tree engine),

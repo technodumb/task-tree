@@ -110,58 +110,32 @@ A dropdown to switch between several independent graphs, each its own forest.
 - **Tray icon / D-Bus activation** as a fallback if a chosen global hotkey can't be grabbed.
 - **macOS / Windows** ports behind `IPlatform` (Carbon/Cocoa hotkeys; Win32 `RegisterHotKey`).
 
-## Deferred — SQLite store (ttd 133)
-Replace the hand-rolled JSON store (`model/Store.cpp`, 112 lines, dependency-free) with
-SQLite behind the same `store::load`/`save` seam.
+## SQLite store (ttd 133) — SHIPPED on `v3`
+`docs/plans/v3.md` records what landed, slice by slice: SQLite behind the unchanged
+`store::load`/`save` seam, incremental row-level writes, soft delete (`deleted_at`),
+done-as-a-timestamp (`done_at`, with `-1` = date unknown), hardened loaders,
+quarantine-on-unreadable, and a held-connection `store::Session` whose
+`PRAGMA data_version` poll makes the app notice and reload another process's commits
+(~1 s) instead of overwriting them. The ttd `stop → edit → restart` dance is gone.
 
-**Verdict first: not worth doing for storage's sake.** 134 tasks ≈ 35 KB; save-on-every-
-change rewrites the whole file atomically (temp + `rename`) from 12 call sites in `App` and
-costs nothing measurable — two orders of magnitude more data before that hurts. The one
-structural argument: **JSON's unit of write is the whole forest; SQLite's is the row.**
-Everything below follows from that, and none of it is reachable without it.
+The original verdict held up: none of this was for storage (134 tasks ≈ 35 KB). The
+structural win is that **JSON's unit of write is the whole forest; SQLite's is the
+row** — and the costs were accepted knowingly: first compiled third-party dependency in
+the persistence path (amalgamation, SHA-pinned); state no longer greppable/diffable, so
+JSON stays permanently as export/import; a schema means migrations (`PRAGMA
+user_version`, currently 3).
 
-- **Concurrent external edits.** The ttd workflow currently has to stop the app, edit
-  `tasks.json`, and restart it, because the running app clobbers the edit on its next save.
-  With WAL (one writer, many readers) an agent or a `tt` CLI can write *while the app runs*;
-  the app reloads the changed rows instead of overwriting them. This is the actual reason to
-  switch.
-- **Persistent undo.** `History` holds in-memory whole-`Forest` snapshots, dropped on exit.
-  An append-only `ops` table makes undo survive restarts and doubles as an audit log
-  (supersedes "crash-safe history" below).
-- **Multiple graphs (ttd 106).** One file, N forests, loaded lazily — removes that entry's
-  "one JSON per graph plus an index file" awkwardness and its atomic-save open question.
-- **Queries.** `created_at`/`done_at` are already persisted but only reachable by walking the
+**Unlocked by the row store, still unbuilt** (also `docs/plans/v3.md` "Not yet done"):
+- **Persistent undo.** `History` holds in-memory whole-`Forest` snapshots, dropped on
+  exit — and now also on an external-change reload. An append-only `ops` table makes
+  undo survive both and doubles as an audit log (supersedes "crash-safe history" below).
+- **Multiple graphs (ttd 106).** One file, N forests, loaded lazily — a `graph_id`
+  column plus a graphs table, instead of a directory of JSON files.
+- **Queries.** `created_at`/`done_at` are persisted but only reachable by walking the
   forest in C++; throughput, aging and "untouched for 30 days" become `SELECT`s.
-
-**Costs to accept explicitly**
-- `tt_core` (model + layout + palette) is the dependency-free layer and stays that way.
-  `tt_io` already links nlohmann/json and toml++, but those are header-only: SQLite is the
-  first *compiled* third-party library in the persistence path, and the
-  `plan/qt6-fallback` / `plan/imgui-alt` branches reuse `model/` + `Store` verbatim.
-- Loses greppable, diffable, hand-repairable state. `.dump` is not the same thing.
-- A schema means migrations. JSON version-stamps (`{"version": 1}`) and never needed one; a
-  table does (`PRAGMA user_version`).
-
-**Shape if built**
-- `tasks(id, parent, ord, text, done, collapsed, status, created_at, done_at)` +
-  `meta(key, value)` for `next_id` / schema version. `roots` and the DONE section become
-  derived (`parent = 0`, plus the done flag) rather than stored vectors. Sibling order lives in
-  `ord` — which finally gives the sibling-reordering item under *interaction & motion* a home,
-  since `Forest::reparent` takes an index today that every caller ignores.
-  *(Built on `v3`; see `docs/plans/v3.md` for what actually shipped, including `deleted_at`
-  soft delete and done-as-a-flag.)*
-- Keep whole-forest `load`/`save` first (load at start, save as one transaction) so `App` and
-  its 12 call sites don't change on day one; move to incremental row writes after that works.
-- WAL, `synchronous=NORMAL`, single writer.
-- **Keep JSON permanently** as export/import (see below): backup, git-diffable snapshot, and
-  the ttd fallback if the DB is ever wedged.
-- Migration: on first run, if `tasks.json` exists and the DB doesn't, import it and leave the
-  JSON in place as `tasks.json.bak`.
-
-**Cheaper alternative if external edits are the only goal.** Watch the data directory with
-inotify (save is a `rename`, so watch the dir, not the file) and reload on change — ~60 lines,
-no new dependency. It does *not* fix clobbering: the app's next whole-file save still wins. Fits
-"pick up my edits", not "edit while I work".
+  (ttd 143 — surfacing created/done in the UI — reads exactly these columns.)
+- **Sibling reordering.** `ord` is stored now, so the *interaction & motion* item
+  finally has a home; `Forest::reparent` takes an index today that every caller ignores.
 
 ## Deferred — data & polish
 - **Export / import** (Markdown outline, OPML, JSON). Becomes load-bearing if the SQLite
