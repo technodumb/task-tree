@@ -76,7 +76,13 @@ std::int64_t nowMs() {
 // Owning handles: every early return below closes/finalizes without a goto ladder.
 struct Db {
     sqlite3* h = nullptr;
-    ~Db() { if (h) sqlite3_close(h); }
+    ~Db() { close(); }
+    // sqlite3_open_v2 hands back a handle even when it FAILS, so failure paths (and the
+    // Session, which retries opens) must be able to drop it explicitly.
+    void close() {
+        if (h) sqlite3_close(h);
+        h = nullptr;
+    }
     bool exec(const char* sql) const {
         return sqlite3_exec(h, sql, nullptr, nullptr, nullptr) == SQLITE_OK;
     }
@@ -166,15 +172,9 @@ bool sameRow(const Task& a, const Task& b) {
            a.createdAt == b.createdAt && a.doneAt == b.doneAt;
 }
 
-} // namespace
-
-bool loadDb(Forest& f, const std::string& path) {
-    std::error_code ec;
-    if (!fs::exists(path, ec)) return false;   // absent -> empty forest, as with JSON
-
-    Db db;
-    if (!openDb(db, path, false)) return false;
-
+// The read itself, given an open connection. Shared by loadDb (fresh connection per
+// call) and Session::load (one held connection).
+bool loadFromDb(const Db& db, Forest& f) {
     f.nodes.clear();
     f.roots.clear();
     f.nextId = 1;
@@ -227,12 +227,8 @@ bool loadDb(Forest& f, const std::string& path) {
     return true;
 }
 
-bool saveDb(const Forest& f, const std::string& path, const Forest* baseline) {
-    const fs::path p(path);
-    if (auto dir = p.parent_path(); !dir.empty()) paths::ensureDir(dir);
-
-    Db db;
-    if (!openDb(db, path, true)) return false;
+// The write itself, given an open connection. Shared by saveDb and Session::save.
+bool saveToDb(const Db& db, const Forest& f, const Forest* baseline) {
     // One transaction per save: a reader sees the previous state or the new one, never a
     // half-written tree. IMMEDIATE takes the write lock up front.
     if (!db.exec("BEGIN IMMEDIATE")) return false;
@@ -330,6 +326,95 @@ bool saveDb(const Forest& f, const std::string& path, const Forest* baseline) {
         return false;
     }
     return db.exec("COMMIT");
+}
+
+// The counter SQLite bumps for every commit made by a connection OTHER than the one
+// asking — the entire basis of Session::changedExternally(). -1 on failure.
+std::int64_t dataVersionOf(const Db& db) {
+    Stmt q;
+    if (!q.prepare(db.h, "PRAGMA data_version") || sqlite3_step(q.h) != SQLITE_ROW) return -1;
+    return sqlite3_column_int64(q.h, 0);
+}
+
+} // namespace
+
+bool loadDb(Forest& f, const std::string& path) {
+    std::error_code ec;
+    if (!fs::exists(path, ec)) return false;   // absent -> empty forest, as with JSON
+    Db db;
+    if (!openDb(db, path, false)) return false;
+    return loadFromDb(db, f);
+}
+
+bool saveDb(const Forest& f, const std::string& path, const Forest* baseline) {
+    const fs::path p(path);
+    if (auto dir = p.parent_path(); !dir.empty()) paths::ensureDir(dir);
+    Db db;
+    if (!openDb(db, path, true)) return false;
+    return saveToDb(db, f, baseline);
+}
+
+struct Session::Impl {
+    Db db;
+    bool open = false;
+    std::int64_t dataVersion = 0;
+
+    // Open (or keep) the held connection, and take the data_version baseline the moment
+    // it opens — our own later commits will not move it, other writers' will.
+    bool ensureOpen(const std::string& path, bool create) {
+        if (open) return true;
+        if (!openDb(db, path, create)) {
+            db.close();   // sqlite3_open_v2 hands back a handle even on failure
+            return false;
+        }
+        dataVersion = dataVersionOf(db);
+        open = true;
+        return true;
+    }
+    void drop() {
+        db.close();
+        open = false;
+    }
+};
+
+Session::Session(std::string path) : path_(std::move(path)), impl_(std::make_unique<Impl>()) {}
+Session::~Session() = default;
+
+bool Session::load(Forest& f) {
+    if (!isDbPath(path_)) return loadJson(f, path_);
+    // No CREATE here: loading must not invent a store (matches loadDb's absent -> false).
+    if (!impl_->ensureOpen(path_, false)) return false;
+    if (!loadFromDb(impl_->db, f)) {
+        // A connection that failed to read holds no promise it can be trusted to write —
+        // and dropping it frees the file for quarantine().
+        impl_->drop();
+        return false;
+    }
+    impl_->dataVersion = dataVersionOf(impl_->db);
+    return true;
+}
+
+bool Session::save(const Forest& f, const Forest* baseline) {
+    if (!isDbPath(path_)) return saveJson(f, path_);
+    const fs::path p(path_);
+    if (auto dir = p.parent_path(); !dir.empty()) paths::ensureDir(dir);
+    if (!impl_->ensureOpen(path_, true)) return false;
+    return saveToDb(impl_->db, f, baseline);
+}
+
+bool Session::changedExternally() {
+    if (!isDbPath(path_)) return false;
+    if (!impl_->open) {
+        // No connection means our last look found nothing (or nothing readable). If the
+        // store can be opened NOW, someone made one behind our back: that is a change,
+        // and its content is by definition unseen. No CREATE — polling must not invent
+        // the file it is watching for.
+        return impl_->ensureOpen(path_, false);
+    }
+    const std::int64_t v = dataVersionOf(impl_->db);
+    if (v < 0 || v == impl_->dataVersion) return false;
+    impl_->dataVersion = v;
+    return true;
 }
 
 int supportedDbSchemaVersion() { return kSchemaVersion; }

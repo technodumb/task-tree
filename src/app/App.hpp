@@ -24,10 +24,12 @@
 
 namespace tt {
 
+namespace store { class Session; }
+
 class App {
 public:
     App(IPlatform& platform, Renderer& renderer, IClassifier& classifier,
-        Config& cfg, Forest& forest, std::string tasksPath);
+        Config& cfg, Forest& forest, store::Session& session);
 
     // Hotkey actions.
     void toggleOverlay();   // show/hide the full overlay
@@ -47,6 +49,7 @@ public:
 
     // Main-loop hooks.
     void applyPendingClassifications();
+    void pollStore();   // notice another process's store writes and reload
     void drawScene(int winW, int winH, float devicePixelRatio);
     bool visible() const { return mode_ != Mode::Hidden; }
     double desiredTimeout() const;   // <0 => block indefinitely
@@ -62,6 +65,7 @@ private:
     // outline for the classifier.
     std::string buildTreeOutline(TaskId exclude) const;
     void save();
+    void reloadFromStore();  // replace forest_ with disk and re-derive dependent state
     void undo();   // Ctrl+Z: restore the previous forest state
     void redo();   // Ctrl+Shift+Z / Ctrl+Y: reapply an undone state
     void afterHistoryChange();  // shared relayout/cleanup after an undo or redo
@@ -95,12 +99,12 @@ private:
     TaskId hitTestDone(Vec2 p) const;
     void handleDoubleClick();
 
-    IPlatform&    platform_;
-    Renderer&     renderer_;
-    IClassifier&  classifier_;
-    Config&       cfg_;
-    Forest&       forest_;
-    std::string   tasksPath_;
+    IPlatform&      platform_;
+    Renderer&       renderer_;
+    IClassifier&    classifier_;
+    Config&         cfg_;
+    Forest&         forest_;
+    store::Session& session_;   // the held store connection (saves + external-change poll)
 
     Mode mode_ = Mode::Hidden;
     TextInput input_;
@@ -111,6 +115,7 @@ private:
     // each write carries only the change AND a node missing from forest_ is known to have
     // been deleted here rather than added by another writer. Seeded with the loaded forest.
     Forest lastSaved_;
+    double lastStorePoll_ = 0.0;   // glfwGetTime() of the last external-change check
 
     // Command palette: the input bar itself, re-purposed by a leading ? / : / > (grammar +
     // match ranking in app/Palette.hpp). Ctrl+F is just "prefix the bar with ?" — there is

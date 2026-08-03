@@ -10,6 +10,7 @@
 // for why SQLite (row-level writes) and what it is expected to unlock.
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -54,6 +55,44 @@ bool loadJson(Forest& f, const std::string& path);
 bool saveJson(const Forest& f, const std::string& path);
 bool loadDb(Forest& f, const std::string& path);
 bool saveDb(const Forest& f, const std::string& path, const Forest* baseline = nullptr);
+
+// One live handle on the store, held for the app's whole run. Two jobs the free
+// functions above cannot do:
+//
+//   - reuse a single SQLite connection, instead of re-running the open/pragma/
+//     CREATE TABLE/upgrade prologue on every save;
+//   - notice OTHER writers. `PRAGMA data_version` moves only when a DIFFERENT
+//     connection commits, so polling it on the same connection the app saves through
+//     makes the app's own writes invisible to the poll and everyone else's visible.
+//     Through a fresh-connection-per-save (the free functions), every save — our own
+//     included — would look like news.
+//
+// JSON paths degrade gracefully: load/save dispatch exactly as store::load/save do,
+// and changedExternally() is simply always false.
+class Session {
+public:
+    explicit Session(std::string path);
+    ~Session();
+    Session(const Session&) = delete;
+    Session& operator=(const Session&) = delete;
+
+    const std::string& path() const { return path_; }
+
+    // Same contracts as store::load / store::save, `baseline` included.
+    bool load(Forest& f);
+    bool save(const Forest& f, const Forest* baseline = nullptr);
+
+    // True ONCE when the store changed under us since this session last read, wrote or
+    // polled it. Reload promptly after a true: the next save from a stale forest would
+    // overwrite the other writer's rows. A store appearing after a failed load counts
+    // as a change; polling never creates the file.
+    bool changedExternally();
+
+private:
+    std::string path_;
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
 
 // Move an unreadable store aside instead of writing over it, returning the new path (empty
 // if it could not be moved). A load that fails on a file that EXISTS means the data is

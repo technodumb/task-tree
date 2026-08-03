@@ -109,10 +109,15 @@ int main() {
                                  "Nothing was changed.\n", jsonPath.c_str());
         }
     }
+    // One Session for the app's whole life. Its held connection is what makes the
+    // external-change poll work: the app's own saves go through it (and so never look
+    // like news), while any other process's commit moves PRAGMA data_version.
+    store::Session session(tasksPath);
     // A load that fails on a file that EXISTS means the data is unreadable, not absent — and
     // carrying on would let the first save replace it with an empty store. So: never write
-    // over a store we could not read.
-    if (!store::load(forest, tasksPath) && std::filesystem::exists(tasksPath)) {
+    // over a store we could not read. (A failed load drops the session's connection, so
+    // quarantine below can move the file out from under it.)
+    if (!session.load(forest) && std::filesystem::exists(tasksPath)) {
         const int have = store::isDbPath(tasksPath) ? store::dbSchemaVersion(tasksPath) : -1;
         if (have > store::supportedDbSchemaVersion()) {
             // Not damaged — just newer than this binary understands. Touching it (even to
@@ -175,7 +180,7 @@ int main() {
     if (llmlog::enabled())
         std::fprintf(stderr, "LLM request log: %s\n", llmlog::path().c_str());
 
-    App app(platform, renderer, *classifier, cfg, forest, tasksPath);
+    App app(platform, renderer, *classifier, cfg, forest, session);
 
     // Global hotkeys.
     platform.registerHotkey(cfg.toggleSpec(), [&app]() { app.toggleOverlay(); });
@@ -225,6 +230,7 @@ int main() {
 
         platform.pumpPlatformEvents();       // run queued hotkey callbacks
         app.applyPendingClassifications();
+        app.pollStore();                     // pick up another process's store writes
 
         if (app.visible()) {
             int fbw = 0, fbh = 0, ww = 0, wh = 0;

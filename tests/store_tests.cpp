@@ -311,6 +311,84 @@ int main() {
         removeDb(db2);
     }
 
+    // ---- Session: a held connection that notices the other writer ---------------
+    // PRAGMA data_version moves only when ANOTHER connection commits. That is why the
+    // app must save through the very connection it polls: its own saves stay invisible
+    // to the poll, an external writer's do not. The free save() opens a fresh
+    // connection per call, so through it EVERY save — ours included — would look like
+    // news.
+    {
+        Forest f;
+        TaskId a = f.addTask("mine");
+
+        const std::string db = tmpFile("session.db").string();
+        removeDb(db);
+
+        store::Session s(db);
+        CHECK(s.save(f), "session save creates the store");
+        CHECK(!s.changedExternally(), "own save is not an external change");
+
+        Forest base = f;
+        f.get(a)->text = "mine, edited";
+        CHECK(s.save(f, &base), "incremental save through the session");
+        CHECK(!s.changedExternally(), "own incremental save is not an external change");
+
+        // Another process — its own connection — commits.
+        Forest other;
+        CHECK(store::loadDb(other, db), "external writer loads");
+        const Forest otherBase = other;
+        TaskId ext = other.addTask("added externally");
+        CHECK(store::saveDb(other, db, &otherBase), "external writer commits");
+
+        CHECK(s.changedExternally(), "the external commit is noticed");
+        CHECK(!s.changedExternally(), "noticed once, not repeatedly");
+
+        Forest g;
+        CHECK(s.load(g), "reload through the session");
+        CHECK(g.exists(ext), "reload sees the external task");
+        CHECK(!s.changedExternally(), "reload resets the baseline");
+        removeDb(db);
+    }
+
+    // ---- Session: a store that appears mid-run is a change too ------------------
+    // The app can start empty (fresh install, or a quarantined store) and an external
+    // writer create the DB while it runs. That must read as "reload", not silence.
+    {
+        const std::string db = tmpFile("session_late.db").string();
+        removeDb(db);
+
+        store::Session s(db);
+        Forest g;
+        CHECK(!s.load(g), "missing store loads as false");
+        CHECK(g.size() == 0, "and leaves the forest empty");
+        CHECK(!s.changedExternally(), "still missing: nothing to report");
+        CHECK(!fs::exists(db), "polling a missing store must not create it");
+
+        Forest other;
+        other.addTask("created while we were empty");
+        CHECK(store::saveDb(other, db), "external writer creates the store");
+
+        CHECK(s.changedExternally(), "the store's appearance is a change");
+        Forest h;
+        CHECK(s.load(h) && h.size() == 1, "and it loads through the session");
+        removeDb(db);
+    }
+
+    // ---- Session: JSON backend loads and saves, never watches -------------------
+    {
+        Forest f;
+        f.addTask("json task");
+        const std::string path = tmpFile("session.json").string();
+        fs::remove(path);
+
+        store::Session s(path);
+        CHECK(s.save(f), "json save through the session");
+        Forest g;
+        CHECK(s.load(g) && equivalent(f, g), "json load through the session");
+        CHECK(!s.changedExternally(), "json: watching unsupported, never 'changed'");
+        fs::remove(path);
+    }
+
     // ---- Soft delete: nothing is ever removed from the DB ----------------------
     {
         Forest f;

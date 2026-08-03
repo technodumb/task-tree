@@ -4,6 +4,7 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -33,13 +34,14 @@ constexpr int kAppendIndex = 1 << 30; // clamped to end by Forest::reparent
 constexpr double kFlashDuration = 1.6; // seconds the new-task path stays highlighted
 constexpr double kSearchDebounce = 0.2; // seconds after typing settles before auto-panning
 constexpr double kPanAnimDur = 0.28;    // seconds for the search / new-node camera glide
+constexpr double kStorePollInterval = 1.0; // seconds between external-change checks
 
 } // namespace
 
 App::App(IPlatform& platform, Renderer& renderer, IClassifier& classifier,
-         Config& cfg, Forest& forest, std::string tasksPath)
+         Config& cfg, Forest& forest, store::Session& session)
     : platform_(platform), renderer_(renderer), classifier_(classifier),
-      cfg_(cfg), forest_(forest), tasksPath_(std::move(tasksPath)),
+      cfg_(cfg), forest_(forest), session_(session),
       // `forest` is already loaded by main, so this is exactly what is on disk: the
       // correct starting baseline. Seeding it empty would make the first save look like
       // "everything is new, nothing was deleted" and leak deleted rows.
@@ -1034,14 +1036,58 @@ double App::desiredTimeout() const {
         return std::max(0.0, searchPanDue_ - glfwGetTime());
     if (!highlightSet_.empty() && glfwGetTime() < highlightUntil_) return 0.03; // animate flash
     if (mode_ != Mode::Hidden) return 0.5; // caret blink while visible
-    return -1.0;                           // block until an event/hotkey
+    // Hidden: block for events — but when the store can be watched, wake at the poll
+    // cadence so another process's edits are already in by the time the overlay shows
+    // (and are never overwritten from a stale forest by a save while hidden).
+    return store::isDbPath(session_.path()) ? kStorePollInterval : -1.0;
 }
 
 void App::save() {
     // Incremental: the store writes only the difference from `lastSaved_`, which also
     // tells it which absences are real deletions. Advance the baseline only on success,
-    // so a failed write is retried in full by the next save.
-    if (store::save(forest_, tasksPath_, &lastSaved_)) lastSaved_ = forest_;
+    // so a failed write is retried in full by the next save. Through the session's held
+    // connection, so our own commits stay invisible to pollStore()'s change check.
+    if (session_.save(forest_, &lastSaved_)) lastSaved_ = forest_;
+}
+
+void App::pollStore() {
+    // Deferred, not skipped, while a drag or an in-bar node edit is underway: reloading
+    // would yank the tree out from under the user's hands. Deferral must come BEFORE the
+    // changedExternally() call — that check reports each change only once.
+    if (drag_.active() || editingNode_ != 0) return;
+    const double now = glfwGetTime();
+    if (now - lastStorePoll_ < kStorePollInterval) return;
+    lastStorePoll_ = now;
+    if (session_.changedExternally()) reloadFromStore();
+}
+
+void App::reloadFromStore() {
+    // Another process committed to the store: what is on disk is now the truth, and the
+    // in-memory forest is the stale copy. Replace it and re-derive everything that
+    // pointed into the old one. Deliberately NO save() here — reloading must not write.
+    Forest fresh;
+    if (!session_.load(fresh)) return;   // unreadable right now; the next poll retries
+    // Ids only ever move forward: the old forest may have promised ids past what disk
+    // knows (a classification can be in flight for one of them).
+    fresh.nextId = std::max(fresh.nextId, forest_.nextId);
+    forest_ = std::move(fresh);
+    lastSaved_ = forest_;   // disk state IS the new incremental baseline
+    // The undo stack predates the external edit: undoing into one of its snapshots and
+    // saving would erase the other writer's rows as "deleted here". Drop it.
+    history_.clear();
+    drag_.cancel();
+    editingNode_ = 0;   // the poll defers while editing; belt and braces
+    focusNode_ = 0;
+    anchorNode_ = 0;
+    reparentTarget_ = 0;
+    highlightSet_.clear();   // the flash path was computed against the old tree
+    if (!forest_.exists(selected_)) selected_ = 0;
+    std::erase_if(doneExpanded_, [this](TaskId id) { return !forest_.exists(id); });
+    forceRelayout();
+    updatePalette();   // candidates/previews may reference vanished or renamed nodes
+    // Same channel as main's other "Store:" notices (the launcher script keeps a log).
+    std::fprintf(stderr, "Store: another writer changed %s — reloaded (%zu tasks)\n",
+                 session_.path().c_str(), forest_.size());
 }
 
 void App::undo() {
