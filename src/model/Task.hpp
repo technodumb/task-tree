@@ -92,10 +92,6 @@ public:
     // is not done or invalid.
     bool restoreFromDone(TaskId id);
 
-    // Rebuild `roots` and repair parent links after a bulk load: any task whose
-    // parent is missing/invalid is promoted to a root (defensive against corruption).
-    void reindexRootsAfterLoad();
-
     // Make a freshly-loaded forest internally consistent WITHOUT discarding the order the
     // loader recovered: a dangling parent link becomes a root, `children` lists are filtered
     // to tasks that really point back (and deduped), a task its parent never listed is

@@ -133,10 +133,9 @@ bool loadJson(Forest& f, const std::string& path) {
     };
     if (ok) ok = readList("roots", f.roots);
     if (ok && j.contains("doneRoots")) ok = readList("doneRoots", f.roots);
-    if (!ok) {
-        f.roots.clear();
-        f.reindexRootsAfterLoad();
-    }
+    // Couldn't read an explicit roots order: drop the partially-filled list so
+    // repairAfterLoad() below rebuilds it from the parent-less nodes (id-sorted).
+    if (!ok) f.roots.clear();
     // The file can disagree with itself — `parent` and `children` are two encodings of one
     // edge, and an older or hand-written file may have only the former. Reconcile them so no
     // task is left existing-but-unreachable.

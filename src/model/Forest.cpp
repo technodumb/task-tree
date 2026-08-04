@@ -202,18 +202,4 @@ void Forest::repairAfterLoad() {
                 roots.end());
 }
 
-void Forest::reindexRootsAfterLoad() {
-    roots.clear();
-    // First pass: any node whose parent is missing becomes a top-level node.
-    for (auto& [id, t] : nodes) {
-        if (t.parent != kNoParent && !exists(t.parent)) t.parent = kNoParent;
-    }
-    // Every parent-less node is a root, done or not — the done flag decides which view
-    // shows it, not which list holds it. Ordered by id for determinism when the loader
-    // recorded no explicit order.
-    for (auto& [id, t] : nodes)
-        if (t.parent == kNoParent) roots.push_back(id);
-    std::sort(roots.begin(), roots.end());
-}
-
 } // namespace tt

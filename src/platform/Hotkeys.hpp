@@ -75,9 +75,6 @@ public:
         if (wake_) wake_();
     }
 
-    std::size_t count() const { return bindings_.size(); }
-    const HotkeySpec& specAt(std::size_t i) const { return bindings_[i].spec; }
-
 private:
     struct Binding {
         HotkeySpec spec;
