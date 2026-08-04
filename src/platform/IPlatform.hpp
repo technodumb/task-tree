@@ -1,7 +1,8 @@
 #pragma once
-// Platform seam: window management + global hotkeys. The X11 implementation lives
-// in PlatformX11; a future Wayland implementation (portal GlobalShortcuts + a
-// layer-shell/portal overlay) can be added behind this same interface.
+// Platform seam: window management + global hotkeys. `PlatformGlfw` implements it on
+// both X11 and macOS (the per-OS parts are behind NativeWindow.hpp and Hotkeys.hpp);
+// a future Wayland implementation (portal GlobalShortcuts + a layer-shell/portal
+// overlay) can be added behind this same interface.
 
 #include <functional>
 

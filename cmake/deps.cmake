@@ -1,13 +1,15 @@
 # Third-party dependencies, all vendored via FetchContent so the only system
-# requirement is the X11 / GL dev headers (see README). Pin tags/commits for
-# reproducible builds.
+# requirement is the X11 / GL dev headers on Linux (nothing on macOS — the SDK has
+# Cocoa and Carbon). See README. Pin tags/commits for reproducible builds.
 
 include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
 
 # ---- GLFW 3.4 : windowing, GL context, input -------------------------------
-set(GLFW_BUILD_X11      ON  CACHE BOOL "" FORCE)
-set(GLFW_BUILD_WAYLAND  OFF CACHE BOOL "" FORCE)  # X11-only POC (see docs/FUTURE.md)
+if(UNIX AND NOT APPLE)
+    set(GLFW_BUILD_X11     ON  CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE) # X11-only for now (docs/FUTURE.md)
+endif()
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
@@ -39,6 +41,49 @@ FetchContent_Declare(httplib
     GIT_TAG        v0.15.3)
 
 FetchContent_MakeAvailable(glfw glad nlohmann_json tomlplusplus httplib)
+
+# glad generates its loader by running its own Python package, which imports Jinja2.
+# Distro Pythons usually have it; Homebrew's is PEP-668 "externally managed", so a
+# plain `pip install jinja2` into it is refused. Provision a private venv in the build
+# tree instead of asking the user to modify their global Python. This is a no-op when
+# the interpreter on PATH can already import jinja2 (the usual case on Linux).
+#
+# Deliberately probed with find_program, not find_package(Python): FindPython caches
+# its choice internally on the first call, so calling it here would pin the wrong
+# interpreter before glad_add_library() gets to look. We only publish VIRTUAL_ENV and
+# let glad's own find_package(Python) pick the venv up. The venv is created with
+# --copies so its interpreter is a real binary, not a symlink that FindPython could
+# resolve back out of the venv.
+find_program(TT_BOOTSTRAP_PYTHON NAMES python3 python REQUIRED)
+execute_process(COMMAND "${TT_BOOTSTRAP_PYTHON}" -c "import jinja2"
+                RESULT_VARIABLE TT_JINJA_RC OUTPUT_QUIET ERROR_QUIET)
+if(NOT TT_JINJA_RC EQUAL 0)
+    set(TT_GLAD_VENV "${CMAKE_BINARY_DIR}/glad-venv")
+    if(NOT EXISTS "${TT_GLAD_VENV}/bin/python")
+        message(STATUS "TaskTree: ${TT_BOOTSTRAP_PYTHON} cannot import jinja2, which glad "
+                       "needs — creating a private venv at ${TT_GLAD_VENV}")
+        execute_process(COMMAND "${TT_BOOTSTRAP_PYTHON}" -m venv --copies "${TT_GLAD_VENV}"
+                        RESULT_VARIABLE TT_VENV_RC)
+        if(NOT TT_VENV_RC EQUAL 0)
+            message(FATAL_ERROR "Could not create a venv with ${TT_BOOTSTRAP_PYTHON}. "
+                                "Install Jinja2 for that interpreter and reconfigure.")
+        endif()
+        execute_process(COMMAND "${TT_GLAD_VENV}/bin/python" -m pip install --quiet jinja2
+                        RESULT_VARIABLE TT_PIP_RC)
+        if(NOT TT_PIP_RC EQUAL 0)
+            file(REMOVE_RECURSE "${TT_GLAD_VENV}")   # don't leave a venv without Jinja2
+            message(FATAL_ERROR "Could not install Jinja2 into ${TT_GLAD_VENV} (offline?). "
+                                "Install Jinja2 for a Python on PATH and reconfigure.")
+        endif()
+    endif()
+    # Point FindPython at the venv and nothing else. Python_FIND_FRAMEWORK must be
+    # overridden explicitly: it defaults to FIRST on macOS, which makes FindPython
+    # prefer Homebrew's Python.framework over any virtual environment.
+    set(ENV{VIRTUAL_ENV} "${TT_GLAD_VENV}")
+    set(Python_ROOT_DIR "${TT_GLAD_VENV}")
+    set(Python_FIND_VIRTUALENV ONLY)
+    set(Python_FIND_FRAMEWORK NEVER)
+endif()
 
 # GL 3.3 core loader library target: glad_gl_core_33
 glad_add_library(glad_gl_core_33 STATIC API gl:core=3.3)

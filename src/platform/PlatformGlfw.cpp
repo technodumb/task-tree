@@ -1,11 +1,10 @@
-#include "platform/PlatformX11.hpp"
+#include "platform/PlatformGlfw.hpp"
 
 #include <cstdio>
 
 #include <GLFW/glfw3.h>
-#define GLFW_EXPOSE_NATIVE_X11
-#include <GLFW/glfw3native.h>
-#include <X11/Xatom.h>
+
+#include "platform/NativeWindow.hpp"
 
 namespace tt {
 
@@ -15,7 +14,7 @@ void glfwErrorCallback(int code, const char* desc) {
 }
 } // namespace
 
-bool PlatformX11::init(const char* title) {
+bool PlatformGlfw::init(const char* title) {
     glfwSetErrorCallback(glfwErrorCallback);
     if (!glfwInit()) return false;
 
@@ -23,6 +22,7 @@ bool PlatformX11::init(const char* title) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE); // required for core on macOS
     glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_TRUE); // per-pixel alpha
     glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);              // borderless
     glfwWindowHint(GLFW_FLOATING, GLFW_TRUE);                // always on top
@@ -49,33 +49,12 @@ bool PlatformX11::init(const char* title) {
     for (int i = 0; i < count; ++i)
         if (mons[i] == primary) { monitorIndex_ = i; break; }
 
-    applyEwmhHints();
+    native::applyOverlayHints(win_);
     coverPrimaryMonitor();
     return true;
 }
 
-void PlatformX11::applyEwmhHints() {
-    Display* d = glfwGetX11Display();
-    Window   w = glfwGetX11Window(win_);
-    if (!d || !w) return;
-
-    Atom wtype = XInternAtom(d, "_NET_WM_WINDOW_TYPE", False);
-    Atom util  = XInternAtom(d, "_NET_WM_WINDOW_TYPE_UTILITY", False);
-    XChangeProperty(d, w, wtype, XA_ATOM, 32, PropModeReplace,
-                    reinterpret_cast<unsigned char*>(&util), 1);
-
-    Atom state = XInternAtom(d, "_NET_WM_STATE", False);
-    Atom states[] = {
-        XInternAtom(d, "_NET_WM_STATE_ABOVE", False),
-        XInternAtom(d, "_NET_WM_STATE_SKIP_TASKBAR", False),
-        XInternAtom(d, "_NET_WM_STATE_SKIP_PAGER", False),
-    };
-    XChangeProperty(d, w, state, XA_ATOM, 32, PropModeReplace,
-                    reinterpret_cast<unsigned char*>(states), 3);
-    XFlush(d);
-}
-
-void PlatformX11::coverMonitorIndex(int index) {
+void PlatformGlfw::coverMonitorIndex(int index) {
     if (!win_) return;
     int count = 0;
     GLFWmonitor** mons = glfwGetMonitors(&count);
@@ -90,38 +69,38 @@ void PlatformX11::coverMonitorIndex(int index) {
     }
 }
 
-void PlatformX11::coverPrimaryMonitor() { coverMonitorIndex(monitorIndex_); }
+void PlatformGlfw::coverPrimaryMonitor() { coverMonitorIndex(monitorIndex_); }
 
-void PlatformX11::moveToNextMonitor() {
+void PlatformGlfw::moveToNextMonitor() {
     int count = 0;
     glfwGetMonitors(&count);
     if (count > 1) coverMonitorIndex(monitorIndex_ + 1);
 }
 
-void PlatformX11::showOverlay() {
+void PlatformGlfw::showOverlay() {
     if (!win_) return;
     coverPrimaryMonitor();      // re-cover in case the monitor changed
     glfwShowWindow(win_);
-    glfwFocusWindow(win_);      // borderless windows don't always auto-focus on X11
+    native::activateForInput(win_);
 }
 
-void PlatformX11::hideOverlay() {
+void PlatformGlfw::hideOverlay() {
     if (!win_) return;
     glfwHideWindow(win_);
 }
 
-void PlatformX11::wake() { glfwPostEmptyEvent(); }
+void PlatformGlfw::wake() { glfwPostEmptyEvent(); }
 
-void PlatformX11::registerHotkey(const HotkeySpec& spec, std::function<void()> cb) {
+void PlatformGlfw::registerHotkey(const HotkeySpec& spec, std::function<void()> cb) {
     hotkeys_.add(spec, std::move(cb));
 }
 
-bool PlatformX11::startHotkeys() {
+bool PlatformGlfw::startHotkeys() {
     hotkeys_.setWake([this]() { wake(); });
     return hotkeys_.start();
 }
 
-void PlatformX11::shutdown() {
+void PlatformGlfw::shutdown() {
     hotkeys_.stop();
     if (win_) { glfwDestroyWindow(win_); win_ = nullptr; }
     glfwTerminate();
