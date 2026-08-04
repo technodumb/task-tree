@@ -72,6 +72,8 @@ edits/commits as they come. There is no unattended loop and no standing allowlis
 
 ## Layout of the code
 `src/model` (Task/Forest + JSON store), `src/layout` (pure tidy-tree engine),
-`src/render` (NanoVG), `src/ui` (text input, drag), `src/platform` (X11 window + hotkeys
-behind `IPlatform`), `src/llm` (pluggable classifier), `src/app` (state machine, config).
+`src/render` (NanoVG), `src/ui` (text input, drag), `src/platform` (overlay window +
+global hotkeys behind `IPlatform`; `PlatformGlfw` is shared, with X11 and macOS backends
+for the window hints and the hotkey grabber), `src/llm` (pluggable classifier),
+`src/app` (state machine, config).
 Roadmap in `docs/FUTURE.md`; iterative-plan protocol in `docs/AGENTS.md`.

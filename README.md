@@ -10,23 +10,34 @@ Built in C++ with **GLFW + OpenGL + NanoVG** — a resident background process t
 at ~0% CPU when idle (on-demand rendering) and a small memory footprint, deliberately
 avoiding a browser/Electron stack.
 
-> Status: **proof of concept (v1).** X11 only. See `docs/FUTURE.md` for the roadmap and
-> `docs/AGENTS.md` for how the project advances one reviewable version at a time.
+> Status: **proof of concept (v1).** Linux/X11 and macOS. See `docs/FUTURE.md` for the
+> roadmap and `docs/AGENTS.md` for how the project advances one reviewable version at a
+> time.
 
 ## Requirements
 
-- **Linux with an X11 session** (`echo $XDG_SESSION_TYPE` should print `x11`). Wayland
-  is not yet supported — see `docs/FUTURE.md`. On GNOME, choose "Ubuntu on Xorg" at login.
-- A C++20 compiler, CMake ≥ 3.24, Ninja, and network access for the first build (deps
-  are fetched via CMake `FetchContent`).
-- **X11 + GL development headers** (one-time):
+Both platforms need a C++20 compiler, CMake ≥ 3.24, Ninja, and network access for the
+first build (deps are fetched via CMake `FetchContent`).
 
-  ```sh
-  sudo apt install xorg-dev libgl1-mesa-dev
-  ```
+**Linux** — an **X11 session** (`echo $XDG_SESSION_TYPE` should print `x11`). Wayland is
+not yet supported; see `docs/FUTURE.md`. On GNOME, choose "Ubuntu on Xorg" at login.
+X11 + GL development headers, one-time:
 
-- A TTF font. A system font (DejaVu / Liberation / Ubuntu) is auto-detected; to use a
-  specific one, drop `Inter-Regular.ttf` (or `UI.ttf`) into `assets/fonts/`.
+```sh
+sudo apt install xorg-dev libgl1-mesa-dev
+```
+
+**macOS** — the Xcode Command Line Tools (`xcode-select --install`) are enough; the
+Cocoa/Carbon backend needs no extra packages. With Homebrew:
+
+```sh
+brew install cmake ninja
+brew install openssl@3   # optional: enables HTTPS, i.e. the cloud LLM classifier
+```
+
+Fonts: a TTF is auto-detected — DejaVu / Liberation / Ubuntu on Linux, Arial / Verdana /
+Geneva on macOS. To use a specific one, drop `Inter-Regular.ttf` (or `UI.ttf`) into
+`assets/fonts/`.
 
 ## Build & run
 
@@ -47,9 +58,14 @@ In the overlay: type a task and press **Enter** to create it; **drag** a node on
 another node (or the area just below it) to reparent — siblings reflow to open a gap
 and the tree snaps to its new shape. **Esc** hides the overlay.
 
-> If a hotkey doesn't fire, the compositor may have grabbed it (GNOME/mutter reserves
-> most `Super` combos). The app prints a warning naming any chord it couldn't grab —
-> change it in the config file.
+> If a hotkey doesn't fire, something else already owns it: on Linux the compositor
+> (GNOME/mutter reserves most `Super` combos), on macOS the system or another app
+> (`Cmd+Space` is Spotlight, `Ctrl+Space` switches input source). The app prints a
+> warning naming any chord it couldn't grab — change it in the config file.
+>
+> On macOS, `Super` in a chord means **Command** and `Alt` means **Option**; the config
+> also accepts `cmd` and `option` as spellings. The global hotkeys use Carbon's
+> `RegisterEventHotKey`, so TaskTree needs **no Accessibility permission**.
 
 ## Configuration
 
@@ -94,7 +110,7 @@ src/model/    Task + Forest data model, JSON persistence
 src/layout/   Pure tidy-tree layout engine + geometry (unit tested)
 src/render/   NanoVG renderer (squircles, curved edges, input box)
 src/ui/       Single-line UTF-8 text input, drag & drop controller
-src/platform/ X11 overlay window + global hotkey grabber (behind IPlatform)
+src/platform/ Overlay window + global hotkeys (behind IPlatform; X11 + macOS backends)
 src/llm/      Pluggable classifier seam (Null default, OpenAI-compatible impl)
 src/app/      App state machine, config, XDG paths
 docs/         FUTURE.md (roadmap), AGENTS.md (iterative dev loop), plans/

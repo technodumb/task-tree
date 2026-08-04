@@ -22,7 +22,7 @@
 #include "llm/NullClassifier.hpp"
 #include "llm/OpenAiClassifier.hpp"
 #include "model/Store.hpp"
-#include "platform/PlatformX11.hpp"
+#include "platform/PlatformGlfw.hpp"
 #include "render/Renderer.hpp"
 
 #ifndef TASKTREE_ASSETS_DIR
@@ -36,14 +36,28 @@ namespace {
 App* appOf(GLFWwindow* w) { return static_cast<App*>(glfwGetWindowUserPointer(w)); }
 
 std::string pickFont() {
-    const std::vector<std::string> candidates = {
+    std::vector<std::string> candidates = {
         std::string(TASKTREE_ASSETS_DIR) + "/fonts/Inter-Regular.ttf",
         std::string(TASKTREE_ASSETS_DIR) + "/fonts/UI.ttf",
+    };
+#ifdef __APPLE__
+    // System .ttf files only: NanoVG loads faces with stb_truetype at offset 0, so
+    // the TrueType *collections* macOS ships its UI fonts in (Helvetica.ttc, and
+    // SFNS) would be misparsed.
+    candidates.insert(candidates.end(), {
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/System/Library/Fonts/Supplemental/Verdana.ttf",
+        "/System/Library/Fonts/Geneva.ttf",
+    });
+#else
+    candidates.insert(candidates.end(), {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
         "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
-    };
+    });
+#endif
     std::error_code ec;
     for (const auto& p : candidates)
         if (std::filesystem::exists(p, ec)) return p;
@@ -53,7 +67,7 @@ std::string pickFont() {
 } // namespace
 
 int main() {
-    PlatformX11 platform;
+    PlatformGlfw platform;
     if (!platform.init("TaskTree")) {
         std::fprintf(stderr, "Failed to create the overlay window.\n");
         return 1;
@@ -162,7 +176,8 @@ int main() {
         std::fprintf(stderr, "LLM: Cerebras (model %s)\n", model.c_str());
 #ifndef TASKTREE_HAVE_SSL
         std::fprintf(stderr, "WARNING: built without HTTPS support (OpenSSL). Cerebras will not "
-                             "connect — install libssl-dev and reconfigure/rebuild.\n");
+                             "connect — install OpenSSL (libssl-dev / `brew install openssl@3`) "
+                             "and reconfigure/rebuild.\n");
 #endif
     } else if (cfg.llmEnabled) {
         // Local / self-hosted OpenAI-compatible server (empty key; Ollama etc. ignore it).
@@ -186,7 +201,7 @@ int main() {
     platform.registerHotkey(cfg.toggleSpec(), [&app]() { app.toggleOverlay(); });
     platform.registerHotkey(cfg.quickAddSpec(), [&app]() { app.showQuickAdd(); });
     if (!platform.startHotkeys())
-        std::fprintf(stderr, "Warning: could not open an X connection for hotkeys.\n");
+        std::fprintf(stderr, "Warning: could not install the global hotkey listener.\n");
     for (const std::string& chord : platform.failedChords())
         std::fprintf(stderr, "Warning: hotkey '%s' could not be grabbed (already in use?). "
                              "Change it in %s\n", chord.c_str(), paths::configFile().string().c_str());

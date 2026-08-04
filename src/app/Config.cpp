@@ -82,8 +82,10 @@ bool saveConfig(const Config& c, const std::string& path) {
     std::ostringstream o;
     o << "# TaskTree configuration. Edit and restart to apply.\n\n"
       << "[hotkeys]\n"
-      << "# Global hotkeys. Modifiers: Ctrl, Alt, Shift, Super. Avoid Super combos\n"
-      << "# (the GNOME/mutter compositor grabs most of them).\n"
+      << "# Global hotkeys. Modifiers: Ctrl, Alt, Shift, Super. On macOS, Super is\n"
+      << "# Command and Alt is Option (`cmd` / `option` also work as spellings).\n"
+      << "# Avoid Super combos on Linux (the GNOME/mutter compositor grabs most of\n"
+      << "# them); on macOS avoid Cmd+Space (Spotlight) and Ctrl+Space (input source).\n"
       << "toggle    = \"" << c.toggleHotkey << "\"   # show/hide the full overlay\n"
       << "quick_add = \"" << c.quickAddHotkey << "\" # show just the quick-add box\n\n"
       << "[layout]\n"
