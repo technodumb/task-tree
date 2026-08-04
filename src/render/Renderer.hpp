@@ -122,7 +122,8 @@ public:
 
 private:
     void drawNode(const Rect& r, const std::string& text, const Config& cfg,
-                  bool highlight, float alphaMul, TaskId id, int status) const;
+                  bool highlight, float alphaMul, TaskId id, int status,
+                  const std::string& dateChip) const;
     void drawEdge(const Rect& parent, const Rect& child, const Config& cfg) const;
 
     // Collapse/expand handle on a node with children: a small disc on the bottom edge.

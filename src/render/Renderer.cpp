@@ -1,9 +1,12 @@
 #include "render/Renderer.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 #include <nanovg.h>
+
+#include "model/DateText.hpp"
 
 namespace tt {
 namespace {
@@ -118,7 +121,8 @@ void Renderer::drawEdge(const Rect& parent, const Rect& child, const Config& cfg
 }
 
 void Renderer::drawNode(const Rect& r, const std::string& text, const Config& cfg,
-                        bool highlight, float alphaMul, TaskId id, int status) const {
+                        bool highlight, float alphaMul, TaskId id, int status,
+                        const std::string& dateChip) const {
     // Fill + text colour depend on the status (right-click cycles it).
     const Color fillC = (status == 1) ? cfg.nodeFillInProgress
                       : (status == 2) ? cfg.nodeFillPriority
@@ -166,6 +170,25 @@ void Renderer::drawNode(const Rect& r, const std::string& text, const Config& cf
     nvgFill(vg_);
     nvgFillColor(vg_, col(cfg.idBadgeText, alphaMul));
     nvgText(vg_, bx + 6.f, by + 3.f, label.c_str(), nullptr);
+
+    // Creation-date chip (ttd 145): right end of the same reserved band, in the id
+    // badge's style (font face/size/align still set from it). Dropped, not squeezed,
+    // when the band is too narrow — and empty when the date is unknown, because no
+    // chip beats a guessed one.
+    if (!dateChip.empty()) {
+        float db[4] = {0, 0, 0, 0};
+        nvgTextBounds(vg_, 0, 0, dateChip.c_str(), end(dateChip), db);
+        const float dw = (db[2] - db[0]) + 12.f;
+        const float dx = r.x + r.w - 8.f - dw;
+        if (dx >= bx + bw + 6.f) {
+            nvgBeginPath(vg_);
+            nvgRoundedRect(vg_, dx, by, dw, bh, 5.f);
+            nvgFillColor(vg_, col(cfg.idBadgeBg, alphaMul));
+            nvgFill(vg_);
+            nvgFillColor(vg_, col(cfg.idBadgeText, alphaMul));
+            nvgText(vg_, dx + 6.f, by + 3.f, dateChip.c_str(), end(dateChip));
+        }
+    }
 }
 
 void Renderer::drawCollapseHandle(const Rect& node, bool collapsed, int hiddenCount,
@@ -236,12 +259,15 @@ void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>&
         nvgStroke(vg_);
     }
 
-    // Nodes.
+    // Nodes. One clock read per frame; the per-node chip text is derived from it.
+    const std::int64_t nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::system_clock::now().time_since_epoch())
+                                   .count();
     for (const auto& [id, t] : f.nodes) {
         if (dv.active && id == dv.dragged) continue;
         if (const Rect* r = rectOf(id)) {
             const bool hi = dv.active && dv.validTarget && id == dv.target;
-            drawNode(*r, t.text, cfg, hi, 1.f, id, t.status);
+            drawNode(*r, t.text, cfg, hi, 1.f, id, t.status, shortDate(t.createdAt, nowMs));
             // A node with children gets a collapse/expand handle on its bottom edge.
             if (!t.children.empty())
                 drawCollapseHandle(*r, t.collapsed, t.collapsed ? countDescendants(f, id) : 0, cfg);
@@ -252,7 +278,7 @@ void Renderer::drawTree(const Forest& f, const std::unordered_map<TaskId, Rect>&
     if (dv.active) {
         const Task* t = f.get(dv.dragged);
         drawNode(dv.ghost, t ? t->text : std::string{}, cfg, false, 0.85f, dv.dragged,
-                 t ? t->status : 0);
+                 t ? t->status : 0, t ? shortDate(t->createdAt, nowMs) : std::string{});
     }
 
     // Fading path flash (root -> new node): highlight the path edges and node outlines.

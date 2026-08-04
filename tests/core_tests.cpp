@@ -4,12 +4,15 @@
 #include "app/DevRoute.hpp"
 #include "app/Palette.hpp"
 #include "layout/TidyLayout.hpp"
+#include "model/DateText.hpp"
 #include "model/History.hpp"
 #include "model/Task.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <ctime>
 #include <map>
 
 using namespace tt;
@@ -471,6 +474,25 @@ int main() {
         CHECK(rankMatches(f, "").empty(), "empty query matches nothing");
         CHECK(rankMatches(f, "   ").empty(), "whitespace query matches nothing");
         CHECK(rankMatches(f, "zzz").empty(), "no false matches");
+    }
+
+    { // shortDate: the tiny chip date ("jul 27", year added only when it differs)
+        std::printf("[dates] shortDate\n");
+        // Build inputs FROM local calendar dates, so the expectations hold in any TZ.
+        auto ms = [](int y, int mon, int d) {
+            std::tm t{};
+            t.tm_year = y - 1900; t.tm_mon = mon - 1; t.tm_mday = d;
+            t.tm_hour = 12; t.tm_isdst = -1;
+            return static_cast<std::int64_t>(std::mktime(&t)) * 1000;
+        };
+        const std::int64_t now = ms(2026, 8, 3);
+        CHECK(shortDate(ms(2026, 7, 27), now) == "jul 27", "same year: month + day");
+        CHECK(shortDate(ms(2026, 8, 3), now) == "aug 3", "today: still just month + day");
+        CHECK(shortDate(ms(2026, 1, 1), now) == "jan 1", "year boundary, same year");
+        CHECK(shortDate(ms(2025, 12, 31), now) == "dec 31 '25", "other year gains 'yy");
+        CHECK(shortDate(ms(2004, 1, 5), now) == "jan 5 '04", "single-digit year pads to two");
+        CHECK(shortDate(0, now).empty(), "0 = unset -> no chip");
+        CHECK(shortDate(-1, now).empty(), "-1 = unknown -> no chip");
     }
 
     std::printf("\n%d checks, %d failures\n", g_checks, g_fail);
