@@ -864,7 +864,7 @@ void App::drawScene(int winW, int winH, float dpr) {
                 style.status = paletteStatus();
             }
         }
-        const Rect box = renderer_.drawInput(winW, winH, barText, barText.size(),
+        const Rect box = renderer_.drawInput(winW, winH, barText, input_.caret(),
                                              caretOn() && !menu, cfg_, style);
         drawPaletteDropUp(box);
     } else if (mode_ == Mode::QuickAdd) {
