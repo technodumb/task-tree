@@ -155,6 +155,17 @@ private:
     TaskId editingNode_ = 0; // node whose text the input bar is editing (0 = adding, not editing)
     TaskId reparentTarget_ = 0; // node a Ctrl+click would reparent the selection under (0 = none)
 
+    // Input-bar text selection (task 188): the box rect + the exact style are captured each
+    // frame so a click can be hit-tested against the rendered layout; textSelecting_ is set
+    // while a left-drag inside the bar is sweeping out a selection.
+    Rect inputBox_;
+    InputStyle lastInputStyle_;
+    bool textSelecting_ = false;
+    // Caret blink phase origin: reset on every caret move so the bar is solid the instant
+    // you click or arrow, then resumes blinking (see caretOn()).
+    double caretBlinkBase_ = 0.0;
+    void resetCaretBlink();
+
     // "Hold this node still" anchor, consumed by the next relayout in drawScene: pan_ is
     // shifted so `anchorNode_` lands back on `anchorScreen_`. A Ctrl+click reparent re-packs
     // the tree, which would otherwise slide the clicked parent out from under the cursor.

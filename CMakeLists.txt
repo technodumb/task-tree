@@ -171,4 +171,11 @@ if(TASKTREE_BUILD_TESTS)
     add_executable(hotkey_tests tests/hotkey_tests.cpp)
     target_link_libraries(hotkey_tests PRIVATE tt_core)
     add_test(NAME hotkey_tests COMMAND hotkey_tests)
+
+    # Input-bar editing + selection model. TextInput.cpp maps GLFW key constants, so
+    # the test links glfw only for those (header-only) macros — no window is created.
+    add_executable(textinput_tests tests/textinput_tests.cpp src/ui/TextInput.cpp)
+    target_include_directories(textinput_tests PRIVATE src)
+    target_link_libraries(textinput_tests PRIVATE glfw)
+    add_test(NAME textinput_tests COMMAND textinput_tests)
 endif()

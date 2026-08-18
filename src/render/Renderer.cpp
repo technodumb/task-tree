@@ -386,19 +386,17 @@ void Renderer::drawCaret(float x, float centerY, const Config& cfg) const {
     nvgStroke(vg_);
 }
 
-Rect Renderer::drawInput(float screenW, float screenH, const std::string& text,
-                         std::size_t caretByte, bool caretOn, const Config& cfg,
-                         const InputStyle& style) {
-    const bool quickAddMode = style.quickAdd;
-    const bool editing = style.editing;
+Renderer::InputLayout Renderer::layoutInput(float screenW, float screenH,
+                                            const std::string& text, std::size_t caretByte,
+                                            const InputStyle& style) const {
+    InputLayout L;
     const float boxW = std::min(620.f, std::max(360.f, screenW * 0.5f));
     const float bx = (screenW - boxW) * 0.5f;
     const float pad = padY_;
 
     nvgFontFaceId(vg_, font_);
     nvgFontSize(vg_, fontSize_);
-    float asc = 0, desc = 0, lineH = 0;
-    nvgTextMetrics(vg_, &asc, &desc, &lineH);
+    nvgTextMetrics(vg_, &L.asc, &L.desc, &L.lineH);
 
     // A palette mode claims a section at the bar's left end; the text — and the wrap width
     // with it — starts after it, so the two never collide. `chipWidth` lets the caller give
@@ -406,43 +404,57 @@ Rect Renderer::drawInput(float screenW, float screenH, const std::string& text,
     const float chipTextW = style.chip.empty()
                               ? 0.f
                               : nvgTextBounds(vg_, 0, 0, style.chip.c_str(), end(style.chip), nullptr);
-    const float chipW = style.chip.empty() ? 0.f : std::max(chipTextW + 24.f, style.chipWidth);
-    const float contentW = boxW - 2 * padX_ - chipW;
+    L.chipW = style.chip.empty() ? 0.f : std::max(chipTextW + 24.f, style.chipWidth);
+    L.contentW = boxW - 2 * padX_ - L.chipW;
 
     // Wrap the input into visual lines so the box grows as text is typed.
-    struct Row { int start, end, next; };
-    std::vector<Row> rows;
     if (!text.empty()) {
         const char* s = text.c_str();
         const char* e = s + text.size();
         const char* p = s;
         NVGtextRow tr[8];
         int n = 0;
-        while ((n = nvgTextBreakLines(vg_, p, e, contentW, tr, 8)) > 0) {
+        while ((n = nvgTextBreakLines(vg_, p, e, L.contentW, tr, 8)) > 0) {
             for (int i = 0; i < n; ++i)
-                rows.push_back({(int)(tr[i].start - s), (int)(tr[i].end - s), (int)(tr[i].next - s)});
+                L.rows.push_back({(int)(tr[i].start - s), (int)(tr[i].end - s), (int)(tr[i].next - s)});
             p = tr[n - 1].next;
         }
     }
-    if (rows.empty()) rows.push_back({0, 0, 0});
+    if (L.rows.empty()) L.rows.push_back({0, 0, 0});
 
     // Which visual line holds the caret?
     const int cb = (int)std::min(caretByte, text.size());
-    int caretRow = (int)rows.size() - 1;
-    for (int i = 0; i < (int)rows.size(); ++i)
-        if (cb >= rows[i].start && cb <= rows[i].next) { caretRow = i; if (cb < rows[i].next) break; }
+    L.caretRow = (int)L.rows.size() - 1;
+    for (int i = 0; i < (int)L.rows.size(); ++i)
+        if (cb >= L.rows[i].start && cb <= L.rows[i].next) { L.caretRow = i; if (cb < L.rows[i].next) break; }
 
     const int maxLines = 10;                 // cap growth; scroll to keep the caret in view
-    const int total = (int)rows.size();
-    int firstRow = 0;
+    const int total = (int)L.rows.size();
+    L.firstRow = 0;
     if (total > maxLines)
-        firstRow = std::max(0, std::min(caretRow - maxLines + 1, total - maxLines));
-    const int shown = std::min(total, maxLines);
+        L.firstRow = std::max(0, std::min(L.caretRow - maxLines + 1, total - maxLines));
+    L.shown = std::min(total, maxLines);
 
-    const float boxH = shown * lineH + 2 * pad + 4.f;
+    const float boxH = L.shown * L.lineH + 2 * pad + 4.f;
     // Quick-add (Ctrl+Alt+Enter): centred on screen. Full overlay (Ctrl+Alt+Space):
     // bottom anchored -> grows UP.
-    const float by = quickAddMode ? (screenH - boxH) * 0.5f : (screenH - 40.f - boxH);
+    const float by = style.quickAdd ? (screenH - boxH) * 0.5f : (screenH - 40.f - boxH);
+
+    L.box = {bx, by, boxW, boxH};
+    L.tx = bx + L.chipW + padX_;
+    L.textTop = by + (boxH - L.shown * L.lineH) * 0.5f;
+    return L;
+}
+
+Rect Renderer::drawInput(float screenW, float screenH, const std::string& text,
+                         std::size_t caretByte, std::size_t selBegin, std::size_t selEnd,
+                         bool caretOn, const Config& cfg, const InputStyle& style) {
+    const bool editing = style.editing;
+    const InputLayout L = layoutInput(screenW, screenH, text, caretByte, style);
+    const float bx = L.box.x, by = L.box.y, boxW = L.box.w, boxH = L.box.h;
+    const float tx = L.tx, textTop = L.textTop;
+    selBegin = std::min(selBegin, text.size());
+    selEnd = std::min(selEnd, text.size());
 
     // One field, several jobs — only the border colour says which: subtle node border when
     // adding, selection-blue when editing a node, and the palette tint in command modes.
@@ -456,7 +468,7 @@ Rect Renderer::drawInput(float screenW, float screenH, const std::string& text,
     if (!style.chip.empty()) {
         const float inset = 1.5f;                      // stay inside the border stroke
         const float r = std::max(0.f, cfg.cornerRadius - inset);
-        const float x0 = bx + inset, x1 = bx + chipW;
+        const float x0 = bx + inset, x1 = bx + L.chipW;
         const float y0 = by + inset, y1 = by + boxH - inset;
         nvgBeginPath(vg_);
         nvgMoveTo(vg_, x1, y0);
@@ -481,10 +493,28 @@ Rect Renderer::drawInput(float screenW, float screenH, const std::string& text,
         nvgText(vg_, (x0 + x1) * 0.5f, by + boxH * 0.5f, style.chip.c_str(), end(style.chip));
     }
 
+    // Selection: a translucent block behind the selected glyphs on each visible row (drawn
+    // under the text so the glyphs stay legible). The advance of the row prefix up to each
+    // edge places it, matching the caret's own measurement.
+    if (selEnd > selBegin) {
+        const Color selCol{120 / 255.f, 175 / 255.f, 255 / 255.f, 1.f};
+        for (int i = L.firstRow; i < L.firstRow + L.shown; ++i) {
+            const int rs = L.rows[i].start, re = L.rows[i].end;
+            const int a = std::max((int)selBegin, rs);
+            const int b = std::min((int)selEnd, re);
+            if (b <= a) continue;
+            const float xa = a > rs ? nvgTextBounds(vg_, 0, 0, text.c_str() + rs, text.c_str() + a, nullptr) : 0.f;
+            const float xb = nvgTextBounds(vg_, 0, 0, text.c_str() + rs, text.c_str() + b, nullptr);
+            const float y0 = textTop + (i - L.firstRow) * L.lineH;
+            nvgBeginPath(vg_);
+            nvgRect(vg_, tx + xa, y0, xb - xa, L.lineH);
+            nvgFillColor(vg_, col(selCol, 0.30f));
+            nvgFill(vg_);
+        }
+    }
+
     // Text (or placeholder): the visible rows form a block centred vertically in the
     // box (the search field's balanced look), one row per wrapped line.
-    const float tx = bx + chipW + padX_;
-    const float textTop = by + (boxH - shown * lineH) * 0.5f;
     nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
     if (text.empty()) {
         // In a palette mode the style's placeholder is authoritative — empty means show
@@ -498,38 +528,68 @@ Rect Renderer::drawInput(float screenW, float screenH, const std::string& text,
     } else {
         nvgFillColor(vg_, col(cfg.nodeText));
         float ty = textTop;
-        for (int i = firstRow; i < firstRow + shown; ++i) {
-            nvgText(vg_, tx, ty, text.c_str() + rows[i].start, text.c_str() + rows[i].end);
-            ty += lineH;
+        for (int i = L.firstRow; i < L.firstRow + L.shown; ++i) {
+            nvgText(vg_, tx, ty, text.c_str() + L.rows[i].start, text.c_str() + L.rows[i].end);
+            ty += L.lineH;
         }
     }
 
     // Caret on its wrapped line, centred on the row's glyph box (drawCaret sizes it).
     if (caretOn) {
-        const float lineTop = textTop + std::max(0, caretRow - firstRow) * lineH;
+        const int cb = (int)std::min(caretByte, text.size());
+        const float lineTop = textTop + std::max(0, L.caretRow - L.firstRow) * L.lineH;
         float adv = 0.f;
-        if (cb > rows[caretRow].start)
-            adv = nvgTextBounds(vg_, 0, 0, text.c_str() + rows[caretRow].start,
+        if (cb > L.rows[L.caretRow].start)
+            adv = nvgTextBounds(vg_, 0, 0, text.c_str() + L.rows[L.caretRow].start,
                                 text.c_str() + cb, nullptr);
-        drawCaret(tx + adv, lineTop + (asc - desc) * 0.5f, cfg);
+        drawCaret(tx + adv, lineTop + (L.asc - L.desc) * 0.5f, cfg);
     }
 
     // Palette status ("7 matches", "node 12", "no match"), right-aligned on the first row.
     // Commands are short, but skip it if this row's text would run into it anyway.
     if (!style.status.empty()) {
+        const int fr = L.firstRow;
         const float sw = nvgTextBounds(vg_, 0, 0, style.status.c_str(), end(style.status), nullptr);
-        const float used = rows[firstRow].end > rows[firstRow].start
-                             ? nvgTextBounds(vg_, 0, 0, text.c_str() + rows[firstRow].start,
-                                             text.c_str() + rows[firstRow].end, nullptr)
+        const float used = L.rows[fr].end > L.rows[fr].start
+                             ? nvgTextBounds(vg_, 0, 0, text.c_str() + L.rows[fr].start,
+                                             text.c_str() + L.rows[fr].end, nullptr)
                              : 0.f;
-        if (used + sw + 24.f < contentW) {
+        if (used + sw + 24.f < L.contentW) {
             nvgTextAlign(vg_, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
             nvgFillColor(vg_, col(cfg.nodeText, 0.5f));
             nvgText(vg_, bx + boxW - padX_, textTop, style.status.c_str(), end(style.status));
             nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
         }
     }
-    return {bx, by, boxW, boxH};
+    return L.box;
+}
+
+std::size_t Renderer::inputByteAt(float screenW, float screenH, const std::string& text,
+                                  std::size_t caretByte, const InputStyle& style,
+                                  Vec2 point) const {
+    if (text.empty()) return 0;
+    const InputLayout L = layoutInput(screenW, screenH, text, caretByte, style);
+
+    // Clamp the click to a visible row, then walk that row's code-point boundaries and
+    // stop at the first whose glyph midpoint the click is left of (the usual caret rule).
+    int rel = (int)std::floor((point.y - L.textTop) / L.lineH);
+    rel = std::max(0, std::min(rel, L.shown - 1));
+    const int row = L.firstRow + rel;
+    const int rs = L.rows[row].start, re = L.rows[row].end;
+    const float localX = point.x - L.tx;
+    if (localX <= 0.f) return static_cast<std::size_t>(rs);
+
+    int i = rs;
+    float prevAdv = 0.f;
+    while (i < re) {
+        int j = i + 1;
+        while (j < re && (static_cast<unsigned char>(text[j]) & 0xC0) == 0x80) ++j;
+        const float adv = nvgTextBounds(vg_, 0, 0, text.c_str() + rs, text.c_str() + j, nullptr);
+        if (localX < (prevAdv + adv) * 0.5f) return static_cast<std::size_t>(i);
+        prevAdv = adv;
+        i = j;
+    }
+    return static_cast<std::size_t>(re);
 }
 
 std::string Renderer::fitText(const std::string& s, float maxW) const {

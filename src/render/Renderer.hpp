@@ -90,11 +90,18 @@ public:
                   TaskId reparentTarget = 0);
 
     // The input widget. In quick-add mode it's a centred box with a drop shadow; otherwise
-    // a bar at the bottom of the overlay. Returns the box rect so callers can stack UI on
-    // top of it (the palette drop-up) without recomputing the wrapped height.
+    // a bar at the bottom of the overlay. `[selBegin, selEnd)` is highlighted as the current
+    // text selection (pass an empty range for none). Returns the box rect so callers can
+    // stack UI on top of it (the palette drop-up) without recomputing the wrapped height.
     Rect drawInput(float screenW, float screenH, const std::string& text,
-                   std::size_t caretByte, bool caretOn, const Config& cfg,
-                   const InputStyle& style);
+                   std::size_t caretByte, std::size_t selBegin, std::size_t selEnd,
+                   bool caretOn, const Config& cfg, const InputStyle& style);
+
+    // Byte offset in `text` nearest to screen `point`, using the exact layout drawInput
+    // produces for (text, caretByte, style) at this window size — drives click-to-place and
+    // drag-select in the bar. Only measures text, so it is safe to call between frames.
+    std::size_t inputByteAt(float screenW, float screenH, const std::string& text,
+                            std::size_t caretByte, const InputStyle& style, Vec2 point) const;
 
     // Command-palette drop-up: candidate rows in a card sitting directly above the input
     // box, best match first. Each row is (lead, rest) — an id badge or a mode symbol, then
@@ -135,6 +142,20 @@ private:
     // They are the same component; only the border colour differs.
     void drawFieldChrome(float bx, float by, float w, float h,
                          const Config& cfg, const Color& border) const;
+
+    // Shared geometry for the input field: the wrapped visual rows plus the box + text
+    // origin they sit in. drawInput draws from it; inputByteAt hit-tests against it, so the
+    // clickable positions and the drawn glyphs always coincide.
+    struct InputRow { int start, end, next; };
+    struct InputLayout {
+        Rect box;
+        float tx = 0.f, textTop = 0.f, lineH = 0.f, asc = 0.f, desc = 0.f;
+        float chipW = 0.f, contentW = 0.f;
+        std::vector<InputRow> rows;
+        int firstRow = 0, shown = 0, caretRow = 0;
+    };
+    InputLayout layoutInput(float screenW, float screenH, const std::string& text,
+                            std::size_t caretByte, const InputStyle& style) const;
 
     // Blinking text caret: a vertical bar of caretHeight(), centred on centerY at x.
     void drawCaret(float x, float centerY, const Config& cfg) const;

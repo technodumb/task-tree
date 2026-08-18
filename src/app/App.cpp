@@ -77,6 +77,7 @@ void App::hide() {
     selected_ = 0;
     reparentTarget_ = 0;
     anchorNode_ = 0;
+    textSelecting_ = false;
     drag_.cancel();
     cancelPanAnim();
     clearPalette();
@@ -89,6 +90,7 @@ void App::onChar(unsigned int codepoint) {
     if (mode_ == Mode::Hidden) return;
     if (tryEnterMode(codepoint)) return;   // ? : > / on an empty bar: mode, not text
     input_.onChar(codepoint);
+    resetCaretBlink();
     updatePalette();
 }
 
@@ -131,8 +133,24 @@ void App::onKey(int key, int action, int mods) {
         if (key == GLFW_KEY_V) {
             if (const char* clip = glfwGetClipboardString(platform_.window())) {
                 input_.insert(clip);
+                resetCaretBlink();
                 updatePalette();
             }
+            return;
+        }
+        // Select-all / copy / cut act on the bar's text selection, so the field behaves like
+        // a normal text box. Ctrl+C with no selection falls through (task 186 copies the
+        // selected node instead).
+        if (key == GLFW_KEY_A) { input_.selectAll(); resetCaretBlink(); return; }
+        if (key == GLFW_KEY_C && input_.hasSelection()) {
+            glfwSetClipboardString(platform_.window(), input_.selectedText().c_str());
+            return;
+        }
+        if (key == GLFW_KEY_X && input_.hasSelection()) {
+            glfwSetClipboardString(platform_.window(), input_.selectedText().c_str());
+            input_.deleteSelection();
+            resetCaretBlink();
+            updatePalette();
             return;
         }
         if (key == GLFW_KEY_M) { moveOverlayToNextMonitor(); return; }          // next monitor
@@ -163,7 +181,7 @@ void App::onKey(int key, int action, int mods) {
     switch (input_.onKey(key, mods)) {
         case TextInput::Action::Submit: commitInput(); break;
         case TextInput::Action::Cancel: hide(); break;
-        case TextInput::Action::None:   updatePalette(); break;  // editing keys change the parse
+        case TextInput::Action::None:   resetCaretBlink(); updatePalette(); break;  // editing keys change the parse
     }
 }
 
@@ -427,6 +445,38 @@ bool App::nodeOnScreen(TaskId id) const {
 void App::onMouseButton(int button, int action, int mods) {
     if (mode_ != Mode::Full) return;
 
+    // Input-bar text selection (task 188). A left-drag that began in the bar keeps extending
+    // the selection until the button is released, wherever the release lands.
+    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE && textSelecting_) {
+        textSelecting_ = false;
+        return;
+    }
+    // A left press inside the bar places or extends the caret. It must be handled before the
+    // node-edit commit below, so clicking to reposition the caret while editing a node's text
+    // doesn't end the edit — the bar is a normal text field. (Not in the '/' menu, where the
+    // bar only names a mode and has no editable text.)
+    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS &&
+        pmode_ != palette::Mode::Menu && inputBox_.contains(mouse_.x, mouse_.y)) {
+        const std::size_t byte = renderer_.inputByteAt(
+            static_cast<float>(lastWinW_), static_cast<float>(lastWinH_),
+            input_.text(), input_.caret(), lastInputStyle_, mouse_);
+        const double t = glfwGetTime();
+        const bool dbl = (t - lastClickTime_ < 0.40) &&
+                         std::fabs(mouse_.x - lastClickPos_.x) < 8.f &&
+                         std::fabs(mouse_.y - lastClickPos_.y) < 8.f;
+        lastClickTime_ = dbl ? 0.0 : t;
+        lastClickPos_ = mouse_;
+        if (dbl) {
+            input_.selectWordAt(byte);            // double-click selects the word
+        } else {
+            input_.moveCaretTo(byte, (mods & GLFW_MOD_SHIFT) != 0);  // shift-click extends
+            textSelecting_ = true;                // arm drag-select
+        }
+        resetCaretBlink();
+        updatePalette();
+        return;
+    }
+
     // Clicking anywhere while editing commits the pending text edit first, then the click
     // is handled normally (select another node, pan, etc.).
     if (editingNode_ != 0 && action == GLFW_PRESS) commitEdit(trim(input_.text()));
@@ -516,6 +566,16 @@ void App::onMouseButton(int button, int action, int mods) {
 
 void App::onCursorPos(double x, double y) {
     mouse_ = {static_cast<float>(x), static_cast<float>(y)};
+    // Drag-select inside the input bar: extend the selection to the byte under the cursor.
+    if (textSelecting_ && mode_ == Mode::Full) {
+        const std::size_t byte = renderer_.inputByteAt(
+            static_cast<float>(lastWinW_), static_cast<float>(lastWinH_),
+            input_.text(), input_.caret(), lastInputStyle_, mouse_);
+        input_.moveCaretTo(byte, /*extend=*/true);
+        resetCaretBlink();
+        updatePalette();
+        return;
+    }
     if (panning_) {
         pan_ = {panOrigin_.x + (mouse_.x - panGrab_.x), panOrigin_.y + (mouse_.y - panGrab_.y)};
         return;
@@ -864,13 +924,19 @@ void App::drawScene(int winW, int winH, float dpr) {
                 style.status = paletteStatus();
             }
         }
+        lastInputStyle_ = style;
         const Rect box = renderer_.drawInput(winW, winH, barText, input_.caret(),
+                                             input_.selBegin(), input_.selEnd(),
                                              caretOn() && !menu, cfg_, style);
+        inputBox_ = box;
         drawPaletteDropUp(box);
     } else if (mode_ == Mode::QuickAdd) {
         InputStyle style;
         style.quickAdd = true;
-        renderer_.drawInput(winW, winH, input_.text(), input_.caret(), caretOn(), cfg_, style);
+        lastInputStyle_ = style;
+        inputBox_ = renderer_.drawInput(winW, winH, input_.text(), input_.caret(),
+                                        input_.selBegin(), input_.selEnd(),
+                                        caretOn(), cfg_, style);
     }
     renderer_.endFrame();
 }
@@ -1026,8 +1092,10 @@ void App::toggleCollapse(TaskId id) {
 }
 
 bool App::caretOn() const {
-    return mode_ != Mode::Hidden && std::fmod(glfwGetTime(), 1.0) < 0.5;
+    return mode_ != Mode::Hidden && std::fmod(glfwGetTime() - caretBlinkBase_, 1.0) < 0.5;
 }
+
+void App::resetCaretBlink() { caretBlinkBase_ = glfwGetTime(); }
 
 double App::desiredTimeout() const {
     if (drag_.active()) return 0.0;        // poll for smooth drag

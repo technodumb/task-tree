@@ -1,5 +1,7 @@
 #include "ui/TextInput.hpp"
 
+#include <algorithm>
+
 #include <GLFW/glfw3.h>
 
 namespace tt {
@@ -63,14 +65,52 @@ std::size_t TextInput::nextWordStart(std::size_t i) const {
     return i;
 }
 
+std::size_t TextInput::alignBoundary(std::size_t i) const {
+    if (i >= text_.size()) return text_.size();
+    while (i > 0 && isContinuation(static_cast<unsigned char>(text_[i]))) --i;
+    return i;
+}
+
+std::pair<std::size_t, std::size_t> TextInput::wordBounds(std::size_t i) const {
+    const std::size_t n = text_.size();
+    if (n == 0) return {0, 0};
+    if (i >= n) i = n - 1;                        // inspect a real char at the edge
+    const bool ws = isWs(text_[i]);              // select the run of the same class
+    std::size_t b = i, e = i;
+    while (b > 0 && isWs(text_[b - 1]) == ws) --b;
+    while (e < n && isWs(text_[e]) == ws) ++e;
+    return {b, e};
+}
+
+void TextInput::deleteSelection() {
+    if (!hasSelection()) return;
+    const std::size_t b = selBegin(), e = selEnd();
+    text_.erase(b, e - b);
+    caret_ = anchor_ = b;
+}
+
+void TextInput::moveCaretTo(std::size_t byte, bool extend) {
+    caret_ = alignBoundary(std::min(byte, text_.size()));
+    if (!extend) anchor_ = caret_;
+}
+
+void TextInput::selectWordAt(std::size_t byte) {
+    const auto [b, e] = wordBounds(std::min(byte, text_.size()));
+    anchor_ = b;
+    caret_ = e;
+}
+
 void TextInput::onChar(unsigned int codepoint) {
+    if (hasSelection()) deleteSelection();
     std::string enc;
     appendUtf8(enc, codepoint);
     text_.insert(caret_, enc);
     caret_ += enc.size();
+    anchor_ = caret_;
 }
 
 void TextInput::insert(const std::string& utf8) {
+    if (hasSelection()) deleteSelection();
     // Drop control characters (e.g. newlines from a multi-line clipboard).
     std::string clean;
     clean.reserve(utf8.size());
@@ -78,10 +118,12 @@ void TextInput::insert(const std::string& utf8) {
         if (static_cast<unsigned char>(c) >= 0x20 || (c & 0x80)) clean.push_back(c);
     text_.insert(caret_, clean);
     caret_ += clean.size();
+    anchor_ = caret_;
 }
 
 TextInput::Action TextInput::onKey(int key, int mods) {
     const bool ctrl = (mods & GLFW_MOD_CONTROL) != 0;
+    const bool shift = (mods & GLFW_MOD_SHIFT) != 0;
     switch (key) {
         case GLFW_KEY_ENTER:
         case GLFW_KEY_KP_ENTER:
@@ -89,22 +131,36 @@ TextInput::Action TextInput::onKey(int key, int mods) {
         case GLFW_KEY_ESCAPE:
             return Action::Cancel;
         case GLFW_KEY_BACKSPACE:
+            if (hasSelection()) { deleteSelection(); break; }
             if (caret_ > 0) {
                 const std::size_t from = ctrl ? prevWordStart(caret_) : prevBoundary(caret_);
                 text_.erase(from, caret_ - from);
                 caret_ = from;
             }
+            anchor_ = caret_;
             break;
         case GLFW_KEY_DELETE:
+            if (hasSelection()) { deleteSelection(); break; }
             if (caret_ < text_.size()) {
                 const std::size_t to = ctrl ? nextWordEnd(caret_) : nextBoundary(caret_);
                 text_.erase(caret_, to - caret_);
             }
+            anchor_ = caret_;
             break;
-        case GLFW_KEY_LEFT:  caret_ = ctrl ? prevWordStart(caret_) : prevBoundary(caret_); break;
-        case GLFW_KEY_RIGHT: caret_ = ctrl ? nextWordStart(caret_) : nextBoundary(caret_); break;
-        case GLFW_KEY_HOME:  caret_ = 0; break;
-        case GLFW_KEY_END:   caret_ = text_.size(); break;
+        // Plain Left/Right with a selection collapse to its near edge; otherwise they move
+        // by a glyph or a word. Shift keeps the anchor, so the selection grows/shrinks.
+        case GLFW_KEY_LEFT:
+            if (hasSelection() && !shift) caret_ = selBegin();
+            else caret_ = ctrl ? prevWordStart(caret_) : prevBoundary(caret_);
+            if (!shift) anchor_ = caret_;
+            break;
+        case GLFW_KEY_RIGHT:
+            if (hasSelection() && !shift) caret_ = selEnd();
+            else caret_ = ctrl ? nextWordStart(caret_) : nextBoundary(caret_);
+            if (!shift) anchor_ = caret_;
+            break;
+        case GLFW_KEY_HOME:  caret_ = 0;             if (!shift) anchor_ = caret_; break;
+        case GLFW_KEY_END:   caret_ = text_.size();  if (!shift) anchor_ = caret_; break;
         default: break;
     }
     return Action::None;
