@@ -32,6 +32,7 @@ std::string trim(const std::string& s) {
 
 constexpr int kAppendIndex = 1 << 30; // clamped to end by Forest::reparent
 constexpr double kFlashDuration = 1.6; // seconds the new-task path stays highlighted
+constexpr double kCopiedToastDuration = 1.0; // seconds the "Copied" pill lingers (ttd 186)
 constexpr double kSearchDebounce = 0.2; // seconds after typing settles before auto-panning
 constexpr double kPanAnimDur = 0.28;    // seconds for the search / new-node camera glide
 constexpr double kStorePollInterval = 1.0; // seconds between external-change checks
@@ -78,6 +79,8 @@ void App::hide() {
     reparentTarget_ = 0;
     anchorNode_ = 0;
     textSelecting_ = false;
+    copiedToastNode_ = 0;
+    copiedToastUntil_ = 0.0;
     drag_.cancel();
     cancelPanAnim();
     clearPalette();
@@ -146,6 +149,8 @@ void App::onKey(int key, int action, int mods) {
             glfwSetClipboardString(platform_.window(), input_.selectedText().c_str());
             return;
         }
+        // No bar selection: Ctrl+C copies the selected node's text with a brief toast.
+        if (key == GLFW_KEY_C && selected_ != 0) { copySelectedNode(); return; }
         if (key == GLFW_KEY_X && input_.hasSelection()) {
             glfwSetClipboardString(platform_.window(), input_.selectedText().c_str());
             input_.deleteSelection();
@@ -930,6 +935,24 @@ void App::drawScene(int winW, int winH, float dpr) {
                                              caretOn() && !menu, cfg_, style);
         inputBox_ = box;
         drawPaletteDropUp(box);
+
+        // "Copied" pill above the node whose text was just copied (task 186). Anchored to the
+        // node's screen rect; if that's off-screen, fall back to the upper-centre of the view.
+        if (glfwGetTime() < copiedToastUntil_ && copiedToastNode_ != 0) {
+            const float fw = static_cast<float>(winW), fh = static_cast<float>(winH);
+            float cx = fw * 0.5f, cyBottom = fh * 0.25f;
+            auto it = rects_.find(copiedToastNode_);
+            if (it != rects_.end()) {
+                const Rect& r = it->second;
+                const float sx = pan_.x + zoom_ * r.cx();
+                const float syTop = pan_.y + zoom_ * r.y;
+                if (sx >= 0.f && sx <= fw && syTop >= 0.f && syTop <= fh) {
+                    cx = sx;
+                    cyBottom = syTop - 8.f;
+                }
+            }
+            renderer_.drawToast(cx, cyBottom, "Copied", cfg_);
+        }
     } else if (mode_ == Mode::QuickAdd) {
         InputStyle style;
         style.quickAdd = true;
@@ -1097,12 +1120,22 @@ bool App::caretOn() const {
 
 void App::resetCaretBlink() { caretBlinkBase_ = glfwGetTime(); }
 
+void App::copySelectedNode() {
+    const Task* t = forest_.get(selected_);
+    if (!t) return;
+    glfwSetClipboardString(platform_.window(), t->text.c_str());
+    copiedToastNode_ = selected_;
+    copiedToastUntil_ = glfwGetTime() + kCopiedToastDuration;
+}
+
 double App::desiredTimeout() const {
     if (drag_.active()) return 0.0;        // poll for smooth drag
     if (panAnimActive_) return 1.0 / 60.0; // ~60fps while the camera glides to a node
     if (searchPanDue_ != 0.0)              // wake exactly when the debounced pan is due
         return std::max(0.0, searchPanDue_ - glfwGetTime());
     if (!highlightSet_.empty() && glfwGetTime() < highlightUntil_) return 0.03; // animate flash
+    if (mode_ != Mode::Hidden && glfwGetTime() < copiedToastUntil_)
+        return std::max(0.0, copiedToastUntil_ - glfwGetTime()); // wake to clear the toast
     if (mode_ != Mode::Hidden) return 0.5; // caret blink while visible
     // Hidden: block for events — but when the store can be watched, wake at the poll
     // cadence so another process's edits are already in by the time the overlay shows

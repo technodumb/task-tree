@@ -176,6 +176,12 @@ private:
     std::unordered_set<TaskId> highlightSet_;
     double highlightUntil_ = 0.0;
 
+    // Ctrl+C on a selected node copies its text and shows a brief "Copied" pill above it
+    // (task 186). copiedToastNode_ anchors the pill; copiedToastUntil_ is when it expires.
+    void copySelectedNode();
+    TaskId copiedToastNode_ = 0;
+    double copiedToastUntil_ = 0.0;
+
     // Canvas view transform (screen = pan + zoom * world). Screen-space UI is unaffected.
     Vec2  pan_;
     float zoom_ = 1.f;

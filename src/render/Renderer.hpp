@@ -103,6 +103,10 @@ public:
     std::size_t inputByteAt(float screenW, float screenH, const std::string& text,
                             std::size_t caretByte, const InputStyle& style, Vec2 point) const;
 
+    // A small transient pill (e.g. "Copied") centred horizontally at cx with its bottom edge
+    // at cyBottom — the copy confirmation shown above a node.
+    void drawToast(float cx, float cyBottom, const std::string& text, const Config& cfg) const;
+
     // Command-palette drop-up: candidate rows in a card sitting directly above the input
     // box, best match first. Each row is (lead, rest) — an id badge or a mode symbol, then
     // its text; every lead gets the same column width so the text lines up. `activeRow` is

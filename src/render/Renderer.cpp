@@ -376,6 +376,43 @@ void Renderer::drawFieldChrome(float bx, float by, float w, float h,
     nvgStroke(vg_);
 }
 
+void Renderer::drawToast(float cx, float cyBottom, const std::string& text,
+                         const Config& cfg) const {
+    nvgFontFaceId(vg_, font_);
+    nvgFontSize(vg_, fontSize_);
+    float asc = 0, desc = 0, lh = 0;
+    nvgTextMetrics(vg_, &asc, &desc, &lh);
+    const float tw = nvgTextBounds(vg_, 0, 0, text.c_str(), end(text), nullptr);
+    const float padX = 14.f, padY = 6.f;
+    const float w = tw + 2 * padX;
+    const float h = lh + 2 * padY;
+    const float x = cx - w * 0.5f;
+    const float y = cyBottom - h;      // pill bottom rests at cyBottom (just above the node)
+    const float r = h * 0.5f;          // fully rounded ends
+
+    NVGpaint shadow = nvgBoxGradient(vg_, x, y + 3, w, h, r, 16.f,
+                                     nvgRGBA(0, 0, 0, 140), nvgRGBA(0, 0, 0, 0));
+    nvgBeginPath(vg_);
+    nvgRect(vg_, x - 30, y - 30, w + 60, h + 60);
+    nvgRoundedRect(vg_, x, y, w, h, r);
+    nvgPathWinding(vg_, NVG_HOLE);
+    nvgFillPaint(vg_, shadow);
+    nvgFill(vg_);
+
+    nvgBeginPath(vg_);
+    nvgRoundedRect(vg_, x, y, w, h, r);
+    nvgFillColor(vg_, col(cfg.quickAddFill));
+    nvgFill(vg_);
+    nvgStrokeColor(vg_, col(cfg.nodeBorder));
+    nvgStrokeWidth(vg_, 1.f);
+    nvgStroke(vg_);
+
+    nvgTextAlign(vg_, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+    nvgFillColor(vg_, col(cfg.nodeText));
+    nvgText(vg_, cx, y + h * 0.5f, text.c_str(), end(text));
+    nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+}
+
 void Renderer::drawCaret(float x, float centerY, const Config& cfg) const {
     const float half = caretHeight() * 0.5f;
     nvgBeginPath(vg_);
