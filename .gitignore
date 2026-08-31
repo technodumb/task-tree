@@ -27,3 +27,6 @@ _deps/
 .vscode/
 .idea/
 *.swp
+
+#AI 
+.claude
