@@ -52,7 +52,7 @@ if(APPLE AND NOT DEFINED OPENSSL_ROOT_DIR)
         endif()
     endif()
 endif()
-find_package(OpenSSL) # enables HTTPS in cpp-httplib for cloud LLMs (Cerebras/OpenAI)
+find_package(OpenSSL) # enables HTTPS in cpp-httplib for cloud LLMs (Groq/OpenAI)
 
 # X11 is the Linux/BSD window server; on macOS the platform backend is Cocoa/Carbon
 # (see src/platform/NativeWindowMac.mm + HotkeysMac.mm) and needs no system package.
@@ -64,6 +64,10 @@ if(UNIX AND NOT APPLE)
             "    sudo apt install xorg-dev libgl1-mesa-dev\n"
             "(xorg-dev gives X11/Xlib.h etc., libgl1-mesa-dev gives the GLX headers).")
     endif()
+    # GLib/GIO drives the StatusNotifierItem tray icon (src/platform/TrayGio.cpp).
+    # The runtime is already loaded by every desktop session; only the headers are new.
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0 gobject-2.0 glib-2.0)
 endif()
 
 include(cmake/deps.cmake)
@@ -105,11 +109,13 @@ add_executable(tasktree
 if(APPLE)
     target_sources(tasktree PRIVATE
         src/platform/NativeWindowMac.mm
-        src/platform/HotkeysMac.mm)
+        src/platform/HotkeysMac.mm
+        src/platform/TrayNull.cpp)   # NSStatusItem backend not written yet
 else()
     target_sources(tasktree PRIVATE
         src/platform/NativeWindowX11.cpp
-        src/platform/HotkeysX11.cpp)
+        src/platform/HotkeysX11.cpp
+        src/platform/TrayGio.cpp)
 endif()
 target_include_directories(tasktree PRIVATE src)
 target_compile_definitions(tasktree PRIVATE
@@ -140,15 +146,15 @@ if(APPLE)
     # Cocoa for the NSWindow overlay hints, Carbon for RegisterEventHotKey.
     target_link_libraries(tasktree PRIVATE "-framework Cocoa" "-framework Carbon")
 else()
-    target_link_libraries(tasktree PRIVATE X11::X11)
+    target_link_libraries(tasktree PRIVATE X11::X11 PkgConfig::GIO)
 endif()
 
 if(OpenSSL_FOUND)
     target_compile_definitions(tasktree PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT TASKTREE_HAVE_SSL)
     target_link_libraries(tasktree PRIVATE OpenSSL::SSL OpenSSL::Crypto)
-    message(STATUS "TaskTree: HTTPS enabled (OpenSSL) — cloud LLMs (Cerebras/OpenAI) supported.")
+    message(STATUS "TaskTree: HTTPS enabled (OpenSSL) — cloud LLMs (Groq/OpenAI) supported.")
 else()
-    message(WARNING "TaskTree: OpenSSL not found — HTTPS disabled, so cloud LLMs (Cerebras) "
+    message(WARNING "TaskTree: OpenSSL not found — HTTPS disabled, so cloud LLMs (Groq) "
                     "won't work. Install libssl-dev and reconfigure. Local Ollama (http) is unaffected.")
 endif()
 
@@ -171,6 +177,12 @@ if(TASKTREE_BUILD_TESTS)
     add_executable(hotkey_tests tests/hotkey_tests.cpp)
     target_link_libraries(hotkey_tests PRIVATE tt_core)
     add_test(NAME hotkey_tests COMMAND hotkey_tests)
+
+    # Tray menu id model (TrayMenu.hpp). Header-only and pure, so this runs on
+    # every platform; the live DBus/StatusNotifierItem wiring is verified by hand.
+    add_executable(tray_tests tests/tray_tests.cpp)
+    target_link_libraries(tray_tests PRIVATE tt_core)
+    add_test(NAME tray_tests COMMAND tray_tests)
 
     # Input-bar editing + selection model. TextInput.cpp maps GLFW key constants, so
     # the test links glfw only for those (header-only) macros — no window is created.

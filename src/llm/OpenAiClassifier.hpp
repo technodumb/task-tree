@@ -1,5 +1,5 @@
 #pragma once
-// Classifier for any OpenAI-compatible chat-completions endpoint (Cerebras, OpenAI,
+// Classifier for any OpenAI-compatible chat-completions endpoint (Groq, OpenAI,
 // local OpenAI-compatible servers, ...). Bearer-auth; talks to <endpoint>/chat/
 // completions. Same graceful-degradation contract as the other classifiers: every
 // failure path returns a standalone result and never blocks or throws into the UI.
@@ -13,7 +13,7 @@ namespace tt {
 class OpenAiClassifier final : public IClassifier {
 public:
     // `endpoint` is the API base including any version path, e.g.
-    // "https://api.cerebras.ai/v1". `apiKey` goes in the Authorization header.
+    // "https://api.groq.com/openai/v1". `apiKey` goes in the Authorization header.
     OpenAiClassifier(std::string endpoint, std::string apiKey, std::string model,
                      float confidenceThreshold, int timeoutMs);
 

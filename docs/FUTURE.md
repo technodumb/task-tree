@@ -84,7 +84,7 @@ A dropdown to switch between several independent graphs, each its own forest.
 
 ## Deferred — classifier (LLM)
 - **Generic provider system + connection modal.** Today: `NullClassifier` (off) and
-  `OpenAiClassifier` (any OpenAI-compatible endpoint — Cerebras via `CEREBRAS_API_KEY`, or a
+  `OpenAiClassifier` (any OpenAI-compatible endpoint — Groq via `GROQ_API_KEY`, or a
   local server like Ollama at `.../v1`). Generalise behind one seam, fully user-configurable:
   - In-app **modal** (no config-file editing) to add/edit connections: pick a provider
     *type* (local / OpenAI-compatible cloud / Ollama / Anthropic / custom base-URL / future

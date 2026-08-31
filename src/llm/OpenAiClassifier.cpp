@@ -99,7 +99,7 @@ ClassifyResult run(const std::string& endpoint, const std::string& apiKey,
         const std::string route = prefix + "/chat/completions";
 
         // Retry transient transport failures (dropped connection, TLS blip, timeout,
-        // flaky IPv6 — Cerebras is IPv6/Cloudflare). Do NOT retry real HTTP responses
+        // flaky IPv6 — Groq is behind Cloudflare). Do NOT retry real HTTP responses
         // (a 4xx won't fix itself); those are handled below.
         httplib::Result res;
         std::string lastErr;

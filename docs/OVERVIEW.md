@@ -216,8 +216,8 @@ snapshots, so any mutation is reversible without per-op inverse logic (v2).
 - On task creation, a local/cloud LLM can place the task in the tree. Runs **async, off
   the UI thread**; the task is created standalone immediately and reparented when/if a
   result arrives (never blocks).
-- Backend = **any OpenAI-compatible endpoint**. **Cerebras** is auto-selected when
-  `CEREBRAS_API_KEY` is set; a local server (e.g. Ollama at `.../v1`) via `[llm]` config.
+- Backend = **any OpenAI-compatible endpoint**. **Groq** is auto-selected when
+  `GROQ_API_KEY` is set; a local server (e.g. Ollama at `.../v1`) via `[llm]` config.
 - Prompt sends the current canvas tree as `\[id] parent=<pid|none>: text` lines (DONE
   tasks excluded); model returns `{relation: standalone|child_of|parent_of, targetId,
   confidence}`. `parent_of` inserts the new task **between** the target and its parent.

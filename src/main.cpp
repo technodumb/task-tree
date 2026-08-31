@@ -161,21 +161,21 @@ int main() {
     }
 
     // Classifier selection (all cloud/local LLMs go through the one OpenAI-compatible
-    // client): CEREBRAS_API_KEY env -> Cerebras; else config's OpenAI-compatible endpoint
+    // client): GROQ_API_KEY env -> Groq; else config's OpenAI-compatible endpoint
     // if enabled (e.g. a local Ollama at http://localhost:11434/v1); else no-op.
     std::unique_ptr<IClassifier> classifier;
     bool llmActive = false;
-    const char* cerebrasKey = std::getenv("CEREBRAS_API_KEY");
-    if (cerebrasKey && *cerebrasKey) {
+    const char* groqKey = std::getenv("GROQ_API_KEY");
+    if (groqKey && *groqKey) {
         std::string model = (cfg.llmModel.empty() || cfg.llmModel == "llama3.2")
-                                ? std::string("gemma-4-31b") : cfg.llmModel;
-        classifier = std::make_unique<OpenAiClassifier>("https://api.cerebras.ai/v1",
-                                                        cerebrasKey, model,
+                                ? std::string("openai/gpt-oss-120b") : cfg.llmModel;
+        classifier = std::make_unique<OpenAiClassifier>("https://api.groq.com/openai/v1",
+                                                        groqKey, model,
                                                         cfg.llmConfidenceThreshold, cfg.llmTimeoutMs);
         llmActive = true;
-        std::fprintf(stderr, "LLM: Cerebras (model %s)\n", model.c_str());
+        std::fprintf(stderr, "LLM: Groq (model %s)\n", model.c_str());
 #ifndef TASKTREE_HAVE_SSL
-        std::fprintf(stderr, "WARNING: built without HTTPS support (OpenSSL). Cerebras will not "
+        std::fprintf(stderr, "WARNING: built without HTTPS support (OpenSSL). Groq will not "
                              "connect — install OpenSSL (libssl-dev / `brew install openssl@3`) "
                              "and reconfigure/rebuild.\n");
 #endif
@@ -205,6 +205,21 @@ int main() {
     for (const std::string& chord : platform.failedChords())
         std::fprintf(stderr, "Warning: hotkey '%s' could not be grabbed (already in use?). "
                              "Change it in %s\n", chord.c_str(), paths::configFile().string().c_str());
+
+    // System-tray icon: a reliable click target for show/hide even when the global
+    // hotkey is swallowed (as an X11 grab can be under Wayland). A no-op where there
+    // is no tray host — the app just carries on without an icon.
+    platform.registerTrayActivate([&app]() { app.toggleOverlay(); });  // left-click
+    {
+        std::vector<TrayItem> menu;
+        menu.push_back(TrayItem{"Show/Hide TaskTree", [&app]() { app.toggleOverlay(); }, false});
+        menu.push_back(TrayItem::sep());
+        menu.push_back(TrayItem{"Quit", [&platform]() {
+                                    glfwSetWindowShouldClose(platform.window(), GLFW_TRUE);
+                                }, false});
+        platform.setTrayMenu(std::move(menu));
+    }
+    platform.startTray();
 
     // Input callbacks -> App.
     GLFWwindow* win = platform.window();
