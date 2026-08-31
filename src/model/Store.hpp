@@ -116,13 +116,4 @@ int supportedDbSchemaVersion();
 // Returns false if the file is missing or unparseable.
 bool jsonTaskCount(const std::string& path, std::size_t& objects, std::size_t& distinct);
 
-// One-time JSON -> SQLite migration. Non-destructive and self-verifying:
-//   - refuses (false) if `dbPath` already exists — an existing store is never touched
-//   - writes the DB, reads it straight back, and requires tt::equivalent() with the
-//     forest loaded from JSON: same ids, order, nextId and every field
-//   - on ANY failure deletes the half-written DB (plus its -wal/-shm) and returns
-//     false, so the caller can keep using the JSON store
-// `jsonPath` is only ever read — this function never writes, renames or removes it.
-bool migrateJsonToDb(const std::string& jsonPath, const std::string& dbPath);
-
 } // namespace tt::store

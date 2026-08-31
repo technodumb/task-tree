@@ -453,47 +453,4 @@ std::vector<DeletedRow> deletedRows(const std::string& path) {
     return out;
 }
 
-bool migrateJsonToDb(const std::string& jsonPath, const std::string& dbPath) {
-    std::error_code ec;
-    if (fs::exists(dbPath, ec)) return false;   // an existing store is never overwritten
-
-    Forest from;
-    if (!loadJson(from, jsonPath)) return false;
-
-    // Pre-flight: does the loaded forest actually account for every task in the file? The
-    // equivalence check below compares the DB against `from`, so a loader that dropped or
-    // merged a task would verify perfectly against its own damaged output. Counting the raw
-    // file is the only way to catch that. A mismatch means duplicate ids or an entry this
-    // build cannot represent, so we refuse and leave the caller on JSON rather than
-    // freezing a lossy copy into the new store.
-    std::size_t objects = 0, distinct = 0;
-    if (!jsonTaskCount(jsonPath, objects, distinct)) return false;
-    if (objects != distinct || from.size() != objects) return false;
-
-    // Any failure past this point leaves nothing behind: the JSON file was only read,
-    // and a partial DB is removed so the next run retries from scratch.
-    const auto scrub = [&dbPath] {
-        std::error_code e;
-        fs::remove(dbPath, e);
-        fs::remove(dbPath + "-wal", e);
-        fs::remove(dbPath + "-shm", e);
-        return false;
-    };
-
-    if (!saveDb(from, dbPath)) return scrub();
-
-    Forest back;
-    if (!loadDb(back, dbPath)) return scrub();
-    if (!equivalent(from, back)) return scrub();   // proof, not optimism
-
-    // Freeze a copy of the source next to it. `jsonPath` itself is already untouched, but it
-    // keeps the name a user would edit by habit; a *.pre-sqlite.bak makes the pre-migration
-    // state unambiguous. Best-effort: the migration has already been verified, and the
-    // original is still there, so a failed copy is not a reason to refuse.
-    std::error_code ignored;
-    fs::copy_file(jsonPath, jsonPath + ".pre-sqlite.bak",
-                  fs::copy_options::skip_existing, ignored);
-    return true;
-}
-
 } // namespace tt::store

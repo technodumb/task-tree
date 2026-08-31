@@ -105,24 +105,15 @@ int main() {
 
     Config cfg = loadOrCreateDefaultConfig();
 
-    // Store: SQLite (docs/FUTURE.md "SQLite store"). A pre-SQLite tasks.json is migrated
-    // once, and only if the migration can prove it round-tripped exactly — otherwise we
-    // stay on JSON. Either way tasks.json is never written, renamed or removed here, so
-    // the old file remains a complete backup of the state before the switch.
+    // Store: SQLite (docs/FUTURE.md "SQLite store"). tasks.db is the store; a pre-SQLite
+    // tasks.json is still opened directly when no DB exists yet, so an unmigrated file is
+    // never silently dropped. (The one-time JSON->SQLite migration was removed — every
+    // install is on SQLite now.) tasks.json is only ever read here, never rewritten.
     Forest forest;
     const std::string jsonPath = paths::tasksFile().string();
     std::string tasksPath = paths::dbFile().string();
-    if (!std::filesystem::exists(tasksPath) && std::filesystem::exists(jsonPath)) {
-        if (store::migrateJsonToDb(jsonPath, tasksPath)) {
-            std::fprintf(stderr, "Store: migrated to %s (verified); %s is now an untouched "
-                                 "backup and is no longer read or written\n",
-                         tasksPath.c_str(), jsonPath.c_str());
-        } else {
-            tasksPath = jsonPath;
-            std::fprintf(stderr, "Store: SQLite migration did not verify — staying on %s. "
-                                 "Nothing was changed.\n", jsonPath.c_str());
-        }
-    }
+    if (!std::filesystem::exists(tasksPath) && std::filesystem::exists(jsonPath))
+        tasksPath = jsonPath;
     // One Session for the app's whole life. Its held connection is what makes the
     // external-change poll work: the app's own saves go through it (and so never look
     // like news), while any other process's commit moves PRAGMA data_version.

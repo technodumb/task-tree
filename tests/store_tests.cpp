@@ -498,46 +498,6 @@ int main() {
         removeDb(db);
     }
 
-    // ---- JSON -> SQLite migration: verified and non-destructive ----------------
-    {
-        Forest f;
-        TaskId r = f.addTask("keep me");
-        f.addTask("child", r);
-        TaskId d = f.addTask("done root");
-        f.markDone(d);
-
-        const std::string js = tmpFile("migrate.json").string();
-        const std::string db = tmpFile("migrate.db").string();
-        removeDb(db);
-        CHECK(store::saveJson(f, js), "seed a JSON store");
-        const std::string before = readAll(js);
-
-        CHECK(store::migrateJsonToDb(js, db), "migration succeeds");
-        CHECK(fs::exists(db), "DB created");
-        CHECK(fs::exists(js), "JSON file still exists after migration");
-        CHECK(readAll(js) == before, "JSON file is byte-for-byte untouched");
-
-        Forest fromJson, fromDb;
-        CHECK(store::loadJson(fromJson, js), "reload the JSON");
-        CHECK(store::loadDb(fromDb, db), "load the migrated DB");
-        CHECK(equivalent(fromJson, fromDb), "migrated DB matches the JSON exactly");
-
-        // Re-running must refuse rather than rewrite a store that already exists.
-        CHECK(!store::migrateJsonToDb(js, db), "migration refuses an existing DB");
-        Forest again;
-        CHECK(store::loadDb(again, db) && equivalent(fromJson, again), "existing DB intact");
-
-        // A missing source leaves no DB behind at all.
-        const std::string db2 = tmpFile("migrate_missing.db").string();
-        removeDb(db2);
-        CHECK(!store::migrateJsonToDb(tmpFile("no_such.json").string(), db2),
-              "migration fails on a missing JSON");
-        CHECK(!fs::exists(db2), "failed migration leaves no DB behind");
-
-        removeDb(db);
-        fs::remove(js);
-    }
-
     // ---- Hostile / foreign JSON: never crash, never silently lose a task ---------
     // These are shapes another person's file can have but mine does not. The loader used to
     // throw an uncaught type_error on the first two, which kills the app at startup.
@@ -584,13 +544,8 @@ int main() {
         CHECK(d.size() == 2, "both tasks load");
         CHECK(d.get(1) && d.get(1)->children == std::vector<TaskId>{2},
               "the child is reachable from its parent");
-        const std::string bareDb = tmpFile("hostile_bare.db").string();
-        removeDb(bareDb);
-        CHECK(store::migrateJsonToDb(bare, bareDb), "and such a file still migrates");
-        removeDb(bareDb);
-
-        // Duplicate ids cannot be represented, so migration must REFUSE rather than freeze
-        // a lossy copy — the whole point of counting the raw file.
+        // Duplicate ids cannot be represented at all — jsonTaskCount catches them by
+        // counting the raw file, which is why it reports objects and distinct ids apart.
         const std::string dup = tmpFile("hostile_dup.json").string();
         write(dup, R"({"version":1,"nextId":3,"roots":[1],"tasks":[
           {"id":1,"parent":0,"text":"first","children":[]},
@@ -598,34 +553,12 @@ int main() {
         std::size_t objects = 0, distinct = 0;
         CHECK(store::jsonTaskCount(dup, objects, distinct), "counting the raw file works");
         CHECK(objects == 2 && distinct == 1, "two entries, one id");
-        const std::string dupDb = tmpFile("hostile_dup.db").string();
-        removeDb(dupDb);
-        CHECK(!store::migrateJsonToDb(dup, dupDb), "duplicate ids refuse migration");
-        CHECK(!fs::exists(dupDb), "and leave no DB behind");
 
         // The real file count must match what the loader produced, for a sane file.
         CHECK(store::jsonTaskCount(bare, objects, distinct) && objects == 2 && distinct == 2,
               "a good file counts straight");
 
         for (const auto& p : {nulls, nullDone, types, bare, dup}) fs::remove(p);
-    }
-
-    // ---- Migration leaves a frozen copy of the source ---------------------------
-    {
-        Forest f;
-        f.addTask("backed up");
-        const std::string js = tmpFile("backup_src.json").string();
-        const std::string db = tmpFile("backup_src.db").string();
-        const std::string bak = js + ".pre-sqlite.bak";
-        removeDb(db);
-        fs::remove(bak);
-        CHECK(store::saveJson(f, js), "seed");
-        CHECK(store::migrateJsonToDb(js, db), "migrate");
-        CHECK(fs::exists(bak), "a .pre-sqlite.bak copy is left next to the source");
-        CHECK(readAll(bak) == readAll(js), "and it is byte-identical to the source");
-        removeDb(db);
-        fs::remove(bak);
-        fs::remove(js);
     }
 
     // ---- An unreadable store is moved aside, never written over ------------------
@@ -703,19 +636,12 @@ int main() {
     }
 
     // ---- Real data check (opt-in): TASKTREE_TEST_JSON=<a copy of tasks.json> ---
-    // Proves the migration on the actual file rather than on synthetic fixtures.
+    // Loads the actual file rather than synthetic fixtures, proving the JSON loader on it.
     if (const char* real = std::getenv("TASKTREE_TEST_JSON")) {
         Forest live;
         CHECK(store::loadJson(live, real), "real tasks.json loads");
-        const std::string db = tmpFile("real_data.db").string();
-        removeDb(db);
-        CHECK(store::migrateJsonToDb(real, db), "real tasks.json migrates + verifies");
-        Forest back;
-        CHECK(store::loadDb(back, db), "migrated real DB loads");
-        CHECK(equivalent(live, back), "every real task survives byte-for-byte");
         std::printf("  real-data check: %zu tasks, %zu top-level, %zu DONE entries\n",
                     live.size(), live.roots.size(), live.doneSectionRoots().size());
-        removeDb(db);
     } else {
         std::printf("  real-data check skipped (set TASKTREE_TEST_JSON to a tasks.json copy)\n");
     }
