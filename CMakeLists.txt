@@ -93,6 +93,19 @@ target_link_libraries(tt_io
         tomlplusplus::tomlplusplus
     PRIVATE sqlite3)
 
+# ---- CLI library + `tt` executable -----------------------------------------
+# A headless client so an agent or the ttd loop can read and mutate the store with the app
+# running or stopped. Links tt_core + tt_io only — no GLFW/GL/X11/GIO — so it builds
+# anywhere the toolchain does, and is produced by both presets (it uses no dev-only
+# feature). sqlite3 is PUBLIC here: tt_io links it PRIVATE, so a consumer of this static
+# lib must still carry sqlite3 to the final link (as store_tests does).
+add_library(tt_cli STATIC src/cli/Cli.cpp)
+target_include_directories(tt_cli PUBLIC src)
+target_link_libraries(tt_cli PUBLIC tt_core tt_io sqlite3 nlohmann_json::nlohmann_json)
+
+add_executable(tt src/cli/main.cpp)
+target_link_libraries(tt PRIVATE tt_cli)
+
 # ---- Application executable -------------------------------------------------
 add_executable(tasktree
     src/main.cpp
@@ -190,4 +203,9 @@ if(TASKTREE_BUILD_TESTS)
     target_include_directories(textinput_tests PRIVATE src)
     target_link_libraries(textinput_tests PRIVATE glfw)
     add_test(NAME textinput_tests COMMAND textinput_tests)
+
+    # The `tt` CLI, driven in-process against temp stores (see tests/cli_tests.cpp).
+    add_executable(cli_tests tests/cli_tests.cpp)
+    target_link_libraries(cli_tests PRIVATE tt_cli sqlite3)
+    add_test(NAME cli_tests COMMAND cli_tests)
 endif()
