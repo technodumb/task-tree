@@ -73,8 +73,9 @@ Hand-editable TOML at `${XDG_CONFIG_HOME:-~/.config}/tasktree/config.toml` (writ
 with defaults on first run). Controls hotkeys, overlay opacity, node max width,
 colours, and the optional LLM endpoint. Restart to apply.
 
-Tasks are stored at `${XDG_DATA_HOME:-~/.local/share}/tasktree/tasks.json` (written
-atomically).
+Tasks are stored at `${XDG_DATA_HOME:-~/.local/share}/tasktree/tasks.db` (SQLite, written
+incrementally per row). A pre-SQLite `tasks.json` at the same path is still read when no
+`tasks.db` exists yet; JSON is otherwise for export/import.
 
 ## Optional: local LLM auto-classification
 
@@ -94,10 +95,34 @@ endpoint = "http://localhost:11434"
 model = "llama3.2"
 ```
 
+## Command line (`tt`)
+
+`tt` is a headless client for the same task store — read or change the tree from a script
+or an agent, with the app running or closed. It links only the pure model + I/O libraries
+(no GLFW/GL/X11), and `cmake --build build` produces it at `build/tt`.
+
+```sh
+tt tree [--json]                       # whole forest (subtree: tt tree <id|query>)
+tt find <query>                        # ranked text matches
+tt show <id|query>                     # one task + its children
+tt add "text" [--parent <id|query>]    # prints the new id
+tt edit <id|query> "text"
+tt done <id|query> | tt undone <id|query>
+tt status <id|query> <normal|in-progress|priority>
+tt parent <child> <parent>             # reparent (refuses cycles)
+tt rm <id|query>                       # soft delete (recoverable; see `tt deleted`)
+```
+
+A node is addressed by numeric id or a unique text match (ambiguity is an error, never a
+guess). Every command takes `--json` (one JSON document on stdout; diagnostics stay on
+stderr) and a `--store <path>` override. Writes cooperate with the running app — each is a
+single transaction it notices and reloads within ~1 s. Exit codes distinguish usage (1),
+not-found (2), ambiguous (3), store-unreadable (4), store-too-new (5), store-busy (6).
+
 ## Tests
 
-The pure logic (task model, tidy-tree layout, persistence, config, hotkey parsing) has
-dependency-free tests:
+The pure logic (task model, tidy-tree layout, persistence, config, hotkey parsing) plus
+the `tt` CLI have dependency-free tests:
 
 ```sh
 ctest --test-dir build --output-on-failure
@@ -106,12 +131,13 @@ ctest --test-dir build --output-on-failure
 ## Project layout
 
 ```
-src/model/    Task + Forest data model, JSON persistence
+src/model/    Task + Forest data model, SQLite + JSON persistence
 src/layout/   Pure tidy-tree layout engine + geometry (unit tested)
 src/render/   NanoVG renderer (squircles, curved edges, input box)
 src/ui/       Single-line UTF-8 text input, drag & drop controller
 src/platform/ Overlay window + global hotkeys (behind IPlatform; X11 + macOS backends)
 src/llm/      Pluggable classifier seam (Null default, OpenAI-compatible impl)
+src/cli/      `tt` — headless read/write CLI over the store (tt_core + tt_io only)
 src/app/      App state machine, config, XDG paths
 docs/         FUTURE.md (roadmap), AGENTS.md (iterative dev loop), plans/
 ```

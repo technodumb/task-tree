@@ -46,9 +46,10 @@ platform/  Overlay window + global hotkeys  ← behind IPlatform (X11 + macOS ba
 render/    NanoVG drawing (nodes/edges/UI)
 ui/        TextInput (line editor) + DragController
 layout/    PURE tidy-tree engine + geometry  ← no GL, unit-tested
-model/     Task/Forest + JSON persistence     ← PURE, unit-tested
+model/     Task/Forest + SQLite/JSON store    ← Task/Forest PURE, unit-tested
 app/       state machine, config, Palette     ← Palette (bar grammar) is PURE, unit-tested
 llm/       Pluggable classifier               ← behind IClassifier
+cli/       `tt` headless read/write CLI        ← tt_core + tt_io only, no GL
 app/       App state machine, Config, paths, ttd routing
 ```
 
@@ -70,6 +71,14 @@ Two deliberate **seams** (exist for extension — do not delete as "dead code"):
 The **pure layers** (`model/`, `layout/`) have zero external deps and are unit-tested
 (`tests/`), so they're stack-agnostic and fast to reason about. `App` is the orchestrator
 that ties model → layout → render and routes input.
+
+**`cli/`** is the `tt` command-line client — the second writer that v3's store layer (WAL,
+`busy_timeout`, `BEGIN IMMEDIATE`, baseline-diffed saves, soft delete, and the
+external-change reload) was built for. It links only `tt_core` + `tt_io`, so it runs with
+the overlay open or closed, and every write passes the loaded forest as the save baseline,
+so a task the app commits concurrently is never clobbered. It is also what the ttd loop and
+the `SessionStart` hook now use instead of hand-written SQL. See `src/cli/Cli.cpp` and
+`openspec/changes/add-tt-cli`.
 
 **Data model** (`model/Task.hpp`): `Task{id, parent, text, children[], collapsed, status,
 createdAt, doneAt}`; `Forest{nodes, roots[], nextId}`. Key ops: `addTask`,

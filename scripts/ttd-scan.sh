@@ -1,93 +1,70 @@
 #!/bin/bash
-# SessionStart hook (read-only): surface pending `ttd>` dev tasks so ANY Claude
-# instance opened in this folder picks them up per CLAUDE.md — no need to be told.
-# Wired in .claude/settings.json. Prints nothing when there's nothing pending.
+# SessionStart hook (read-only): surface pending `ttd>` dev tasks so ANY Claude instance
+# opened in this folder picks them up per CLAUDE.md — no need to be told. Wired in
+# .claude/settings.json. Prints nothing when there's nothing pending.
 #
-# Store-agnostic: reads tasks.db when it exists, else tasks.json — the same rule
-# src/main.cpp uses, so the hook follows the app rather than guessing. Read-only in
-# the strong sense: it never writes the store and never leaves a file behind (see
-# from_db for how; SQLite would otherwise create -shm/-wal sidecars just to read).
-d="$HOME/.local/share/tasktree"
-[ -f "$d/tasks.db" ] || [ -f "$d/tasks.json" ] || exit 0
+# This is now a THIN WRAPPER over the `tt` CLI: `tt` owns store access (it resolves
+# tasks.db-else-tasks.json the same way src/main.cpp does, honouring XDG_DATA_HOME, and a
+# `tree` read never writes the store), so there is no hand-written SQL here any more. All
+# this script does is walk the JSON `tt tree` prints. A task is off the canvas when any
+# task on its parent chain — itself included — is done (`done_at != 0`), so we simply do
+# not descend into a done subtree. A broken hook must never break session start: every
+# failure path exits 0.
+
+# The store the app would use — only its basename is needed, for the header line; `tt`
+# resolves the actual path itself. Nothing pending if there is no store at all.
+data="${XDG_DATA_HOME:-$HOME/.local/share}/tasktree"
+if   [ -f "$data/tasks.db" ];   then store="tasks.db"
+elif [ -f "$data/tasks.json" ]; then store="tasks.json"
+else exit 0
+fi
+
+# Find the tt binary: a dev or prod build in this repo, else one on PATH. Not built yet
+# -> print nothing (build it — `cmake --build build` — to enable the scan).
+root="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+tt=""
+for c in "$root/build/tt" "$root/build-prod/tt"; do
+    [ -x "$c" ] && tt="$c" && break
+done
+[ -n "$tt" ] || tt="$(command -v tt 2>/dev/null)"
+[ -n "$tt" ] || exit 0
 command -v python3 >/dev/null 2>&1 || exit 0
-python3 - "$d/tasks.db" "$d/tasks.json" <<'PY'
-import json, os, shutil, sqlite3, sys, tempfile
 
-db, js = sys.argv[1], sys.argv[2]
+# `tt tree` is a read (never writes / leaves a sidecar). The JSON is passed to python in an
+# env var, NOT on stdin: `python3 -` would read its own SCRIPT from stdin, so the here-doc
+# and a piped tree would collide.
+tree_json="$("$tt" tree --json 2>/dev/null)"
+[ -n "$tree_json" ] || exit 0
 
+TT_TREE_JSON="$tree_json" python3 - "$store" <<'PY'
+import json, os, sys
 
-def descendants(children, roots):
-    """Every id at or under `roots` — i.e. the whole DONE section."""
-    seen, stack = set(), list(roots)
-    while stack:
-        i = stack.pop()
-        if i in seen:
-            continue
-        seen.add(i)
-        stack.extend(children.get(i, []))
-    return seen
+store = sys.argv[1]
+try:
+    forest = json.loads(os.environ["TT_TREE_JSON"])   # a list of root nodes, children nested
+except Exception:
+    sys.exit(0)                        # tt printed nothing / errored -> nothing pending
 
-
-def query(uri):
-    con = sqlite3.connect(uri, uri=True, timeout=2)
-    try:
-        return con.execute("SELECT id,parent,text,done_at FROM tasks WHERE deleted_at=0").fetchall()
-    finally:
-        con.close()
-
-
-def from_db(path):
-    # A -wal file means something has the store open (or closed it uncleanly), so read
-    # with real locking: mode=ro, whose -shm the live app already created. With no -wal
-    # nothing is mid-write, and immutable=1 reads without creating any sidecar at all —
-    # a plain mode=ro would drop a -shm + -wal next to an idle store.
-    try:
-        rows = query(("file:%s?mode=ro" if os.path.exists(path + "-wal")
-                      else "file:%s?immutable=1") % path)
-    except sqlite3.Error:
-        # A WAL database whose -shm is missing cannot be opened read-only. Read a copy
-        # (read-write, so SQLite may replay the WAL) rather than touch the live store.
-        tmp = tempfile.mkdtemp()
-        try:
-            for suffix in ("", "-wal", "-shm"):
-                if os.path.exists(path + suffix):
-                    shutil.copy2(path + suffix, os.path.join(tmp, "c.db" + suffix))
-            rows = query("file:%s" % os.path.join(tmp, "c.db"))
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
-    # The DB stores no roots/children lists, and completion is a timestamp rather than a
-    # flag: done_at != 0 means done (-1 = done, date unknown). A done task keeps its parent,
-    # so the DONE section is every done task plus its descendants.
-    tasks, children, done = [], {}, []
-    for tid, parent, text, done_at in rows:
-        tasks.append({"id": tid, "text": text or ""})
-        if parent:
-            children.setdefault(parent, []).append(tid)
-        if done_at:
-            done.append(tid)
-    return tasks, descendants(children, done)
-
-
-def from_json(path):
-    with open(path) as fh:
-        d = json.load(fh)
-    tasks = d.get("tasks", [])
-    children = {t["id"]: list(t.get("children", [])) for t in tasks}
-    return tasks, descendants(children, d.get("doneRoots", []))
-
+pending = []
+def walk(node):
+    if node.get("done_at"):            # done: this node and its whole subtree are off-canvas
+        return
+    text = node.get("text") or ""
+    if text.lstrip()[:4].lower() == "ttd>":
+        pending.append((node.get("id"), text))
+    for child in node.get("children", []):
+        walk(child)
 
 try:
-    store = db if os.path.exists(db) else js
-    tasks, done = (from_db(db) if store == db else from_json(js))
-    pending = [t for t in sorted(tasks, key=lambda t: t["id"])
-               if t["id"] not in done and t.get("text", "").lstrip()[:4].lower() == "ttd>"]
+    for r in forest:
+        walk(r)
+    pending.sort(key=lambda p: p[0])
     if pending:
         print("Pending TaskTree dev tasks (store: %s) (per CLAUDE.md, pick these up "
               "proactively — do the clearly-scoped ones, ask on the ambiguous ones, "
-              "file to 'ttd ✓ done'):" % os.path.basename(store))
-        for t in pending:
-            print('  [%s] %s' % (t["id"], t["text"]))
+              "file to 'ttd ✓ done'):" % store)
+        for tid, text in pending:
+            print('  [%s] %s' % (tid, text))
 except Exception:
     sys.exit(0)   # a broken hook must never break session start
 PY
